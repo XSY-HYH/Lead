@@ -6,12 +6,12 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Lead.Sandbox</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>Lead Contributors</Authors>
-    <Description>A secure, virtualized plugin sandbox for .NET 8. Load third-party assemblies into an isolated environment with static analysis, honeypot virtualization, and resource limits.</Description>
+    <Description>A secure, virtualized plugin sandbox for .NET 8+. Load any assembly into an isolated environment with static analysis, honeypot virtualization, and resource limits.</Description>
     <PackageTags>sandbox;plugin;security;virtualization;honeypot;isolation</PackageTags>
-    <PackageProjectUrl>https://github.com/LeadSandbox/Lead</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/LeadSandbox/Lead.git</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/XSY-HYH/Lead</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/XSY-HYH/Lead.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
