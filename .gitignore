@@ -23,9 +23,13 @@ packages/
 .DS_Store
 Thumbs.db
 
+## Build output
+publish/
+
 ## Test artifacts
 test_sandbox*/
 sandbox_data/
-test_sandbox_plugin/
-test_sandbox_normal/
+net10_test_sandbox*/
+
+## Trae
 .trae/

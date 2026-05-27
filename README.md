@@ -1,8 +1,14 @@
 # Lead
 
-A secure, virtualized plugin sandbox for .NET 8.
+A secure, virtualized plugin sandbox for .NET 8+.
 
 Lead loads third-party assemblies into an isolated environment where every operation is controlled, monitored, or virtualized. Plugins cannot tell whether they are running in a real system or a honeypot.
+
+## Why Lead?
+
+.NET 10 currently lacks mature hook frameworks and embeddable sandbox solutions. Existing options either don't support .NET 10, require runtime instrumentation that breaks across framework versions, or provide only hard-deny isolation that malicious code can detect and evade.
+
+Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ and .NET 10 out of the box — no native hooks, no runtime patching, no framework-specific dependencies. The honeypot virtualization model makes plugins believe they are operating on a real system while all data is fake and all access is logged.
 
 ## Features
 
