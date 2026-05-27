@@ -1,0 +1,31 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Test artifacts
+test_sandbox*/
+sandbox_data/
+test_sandbox_plugin/
+test_sandbox_normal/
+.trae/
