@@ -1,31 +1,31 @@
 # Lead
 
-A secure, virtualized plugin sandbox for .NET 8+.
+A secure, virtualized assembly sandbox for .NET 8+.
 
-Lead loads **any** .NET assembly — including unsafe, P/Invoke, or unmanaged code — into an isolated environment where every operation is controlled, monitored, or virtualized. Plugins cannot tell whether they are running in a real system or a honeypot.
+Lead loads **any** .NET assembly — including unsafe, P/Invoke, or unmanaged code — into an isolated environment where every operation is controlled, monitored, or virtualized. Loaded code cannot tell whether it is running in a real system or a honeypot.
 
 ## Why Lead?
 
 .NET 10 currently lacks mature hook frameworks and embeddable sandbox solutions. Existing options either don't support .NET 10, require runtime instrumentation that breaks across framework versions, or provide only hard-deny isolation that malicious code can detect and evade.
 
-Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ and .NET 10 out of the box — no native hooks, no runtime patching, no framework-specific dependencies. The honeypot virtualization model makes plugins believe they are operating on a real system while all data is fake and all access is logged.
+Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ and .NET 10 out of the box — no native hooks, no runtime patching, no framework-specific dependencies. The honeypot virtualization model makes loaded code believe it is operating on a real system while all data is fake and all access is logged.
 
 ## Features
 
 - **Load Any Assembly** — no interface requirement, no format restriction; load any .NET DLL and execute it safely
 - **Static Analysis** — IL-level scanning detects unsafe code, P/Invoke, reflection, dynamic IL generation, and 40+ attack vectors; results are advisory by default, blockable via `StrictValidation`
-- **Runtime Isolation** — `AssemblyLoadContext` blocks native DLL loading, restricts dangerous system assemblies, and isolates plugin dependencies
+- **Runtime Isolation** — `AssemblyLoadContext` blocks native DLL loading, restricts dangerous system assemblies, and isolates loaded code dependencies
 - **Virtualization** — Three modes for file/HTTP access:
   - `Block` — hard deny with error codes
   - `Redirect` — transparent path/URL remapping into sandbox VFS
   - `Honeypot` — returns realistic fake data, silently logs all access
-- **Service Injection** — plugins receive only the APIs you register; nothing else is accessible
+- **Service Injection** — loaded code receives only the APIs you register; nothing else is accessible
 - **Resource Limits** — file size, I/O throughput, HTTP request count, execution timeout
 - **Custom Redirectors** — implement `IFileRedirector` / `IHttpResponder` to define your own virtualization logic
 
 ## Quick Start
 
-### Load an ISandboxedPlugin
+### Load and Execute Any DLL
 
 ```csharp
 using Lead;
@@ -37,22 +37,6 @@ var config = new SandboxConfiguration
     MaxExecutionSeconds = 30
 };
 
-config.UseHoneypotDefaults();
-
-using var loader = new PluginLoader(config);
-
-var result = await loader.LoadPluginAsync("ThirdPartyPlugin.dll");
-if (result.Success)
-{
-    await loader.ExecutePluginAsync(result.PluginId);
-    loader.UnloadPlugin(result.PluginId);
-}
-```
-
-### Load Any Assembly
-
-```csharp
-var config = new SandboxConfiguration();
 config.UseHoneypotDefaults();
 
 using var loader = new PluginLoader(config);
@@ -78,6 +62,19 @@ if (result.Success)
 }
 ```
 
+### Load an ISandboxedPlugin (Optional Interface)
+
+If the assembly implements `ISandboxedPlugin`, Lead will automatically initialize and execute it:
+
+```csharp
+var result = await loader.LoadPluginAsync("MyLibrary.dll");
+if (result.Success && result.Plugin != null)
+{
+    await loader.ExecutePluginAsync(result.PluginId);
+    loader.UnloadPlugin(result.PluginId);
+}
+```
+
 ### Strict Mode (Block Unsafe Code)
 
 ```csharp
@@ -87,17 +84,19 @@ var config = new SandboxConfiguration
 };
 ```
 
-## Writing a Plugin
+## Implementing ISandboxedPlugin (Optional)
+
+`ISandboxedPlugin` is an optional interface. Assemblies that implement it gain access to injected services and structured lifecycle management. Assemblies without this interface can still be loaded and invoked via `InvokeMethodAsync`.
 
 ```csharp
 using Lead;
 
-public class MyPlugin : ISandboxedPlugin
+public class MyLibrary : ISandboxedPlugin
 {
     private IPluginContext? _ctx;
 
-    public string Id => "my-plugin";
-    public string Name => "My Plugin";
+    public string Id => "my-library";
+    public string Name => "My Library";
     public string Version => "1.0.0";
 
     public void Initialize(IPluginContext context) => _ctx = context;
@@ -114,8 +113,8 @@ public class MyPlugin : ISandboxedPlugin
 
 ## Redirect Modes
 
-| Mode | File Access | HTTP Access | Plugin Awareness |
-|------|------------|-------------|-----------------|
+| Mode | File Access | HTTP Access | Loaded Code Awareness |
+|------|------------|-------------|----------------------|
 | `Block` | Throws `SandboxException` | Throws `SandboxException` | Knows it's sandboxed |
 | `Redirect` | Remapped to sandbox VFS | Remapped to safe URL | Unaware |
 | `Honeypot` | Returns fake data + logs | Returns fake response + logs | Unaware |
