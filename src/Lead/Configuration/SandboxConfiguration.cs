@@ -25,6 +25,8 @@ public class SandboxConfiguration
 
     public SecurityPolicy SecurityPolicy { get; set; } = new();
 
+    public bool StrictValidation { get; set; } = false;
+
     public Dictionary<string, Dictionary<string, object>> PluginConfigs { get; set; } = new();
 
     private readonly Dictionary<Type, object> _services = new();

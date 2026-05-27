@@ -2,7 +2,7 @@
 
 A secure, virtualized plugin sandbox for .NET 8+.
 
-Lead loads third-party assemblies into an isolated environment where every operation is controlled, monitored, or virtualized. Plugins cannot tell whether they are running in a real system or a honeypot.
+Lead loads **any** .NET assembly — including unsafe, P/Invoke, or unmanaged code — into an isolated environment where every operation is controlled, monitored, or virtualized. Plugins cannot tell whether they are running in a real system or a honeypot.
 
 ## Why Lead?
 
@@ -12,7 +12,9 @@ Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ 
 
 ## Features
 
-- **Static Analysis** — IL-level scanning blocks unsafe code, P/Invoke, reflection, dynamic IL generation, and 40+ attack vectors before loading
+- **Load Any Assembly** — no interface requirement, no format restriction; load any .NET DLL and execute it safely
+- **Static Analysis** — IL-level scanning detects unsafe code, P/Invoke, reflection, dynamic IL generation, and 40+ attack vectors; results are advisory by default, blockable via `StrictValidation`
+- **Runtime Isolation** — `AssemblyLoadContext` blocks native DLL loading, restricts dangerous system assemblies, and isolates plugin dependencies
 - **Virtualization** — Three modes for file/HTTP access:
   - `Block` — hard deny with error codes
   - `Redirect` — transparent path/URL remapping into sandbox VFS
@@ -22,6 +24,8 @@ Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ 
 - **Custom Redirectors** — implement `IFileRedirector` / `IHttpResponder` to define your own virtualization logic
 
 ## Quick Start
+
+### Load an ISandboxedPlugin
 
 ```csharp
 using Lead;
@@ -33,7 +37,6 @@ var config = new SandboxConfiguration
     MaxExecutionSeconds = 30
 };
 
-// Enable honeypot mode (default) — plugins see fake data
 config.UseHoneypotDefaults();
 
 using var loader = new PluginLoader(config);
@@ -44,6 +47,44 @@ if (result.Success)
     await loader.ExecutePluginAsync(result.PluginId);
     loader.UnloadPlugin(result.PluginId);
 }
+```
+
+### Load Any Assembly
+
+```csharp
+var config = new SandboxConfiguration();
+config.UseHoneypotDefaults();
+
+using var loader = new PluginLoader(config);
+
+var result = await loader.LoadPluginAsync("SomeUnsafeLibrary.dll");
+// result.IsRawAssembly == true — no ISandboxedPlugin interface found
+// result.Validation contains static analysis warnings (not errors)
+
+if (result.Success)
+{
+    // Invoke a specific method by name
+    var output = await loader.InvokeMethodAsync(
+        result.PluginId,
+        typeName: "SomeNamespace.SomeClass",
+        methodName: "ProcessData",
+        args: new object[] { "input" }
+    );
+
+    // Or get the Assembly for reflection
+    var assembly = loader.GetLoadedAssembly(result.PluginId);
+
+    loader.UnloadPlugin(result.PluginId);
+}
+```
+
+### Strict Mode (Block Unsafe Code)
+
+```csharp
+var config = new SandboxConfiguration
+{
+    StrictValidation = true  // reject assemblies with unsafe code
+};
 ```
 
 ## Writing a Plugin

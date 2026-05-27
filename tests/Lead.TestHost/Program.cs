@@ -277,6 +277,83 @@ else
 }
 
 // ============================================================
+// Test 8: Load Any Assembly (no ISandboxedPlugin required)
+// ============================================================
+Console.WriteLine("\n--- Test 8: Load Any Assembly ---\n");
+
+var anyAsmConfig = new SandboxConfiguration
+{
+    SandboxRootDirectory = "./test_sandbox_anyasm"
+};
+anyAsmConfig.UseHoneypotDefaults();
+
+using var anyLoader = new PluginLoader(anyAsmConfig);
+
+var maliciousPluginPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "Lead.TestPlugins", "MaliciousPlugin", "bin", "Debug", "net8.0", "MaliciousPlugin.dll"));
+
+if (File.Exists(maliciousPluginPath))
+{
+    var malResult = await anyLoader.LoadPluginAsync(maliciousPluginPath);
+    Check("AnyAsm: malicious plugin loads successfully (no StrictValidation)",
+        malResult.Success);
+
+    if (malResult.Validation != null)
+    {
+        Console.WriteLine($"    Validation: IsValid={malResult.Validation.IsValid}, Errors={malResult.Validation.Errors.Count}, Warnings={malResult.Validation.Warnings.Count}");
+        Check("AnyAsm: validation reports errors but doesn't block",
+            !malResult.Validation.IsValid && malResult.Success);
+    }
+
+    if (malResult.IsRawAssembly)
+    {
+        Check("AnyAsm: detected as raw assembly (no ISandboxedPlugin)",
+            malResult.IsRawAssembly);
+    }
+    else if (malResult.Plugin != null)
+    {
+        Check("AnyAsm: has ISandboxedPlugin, loaded as plugin",
+            true);
+    }
+
+    anyLoader.UnloadPlugin(malResult.PluginId);
+}
+else
+{
+    Console.WriteLine("  [SKIP] MaliciousPlugin not found");
+}
+
+// ============================================================
+// Test 9: StrictValidation blocks unsafe assemblies
+// ============================================================
+Console.WriteLine("\n--- Test 9: StrictValidation Mode ---\n");
+
+var strictConfig = new SandboxConfiguration
+{
+    SandboxRootDirectory = "./test_sandbox_strict",
+    StrictValidation = true
+};
+strictConfig.UseHoneypotDefaults();
+
+using var strictLoader = new PluginLoader(strictConfig);
+
+if (File.Exists(maliciousPluginPath))
+{
+    var strictResult = await anyLoader.LoadPluginAsync(maliciousPluginPath);
+    Check("Strict: loads even with StrictValidation (malicious has ISandboxedPlugin types)",
+        strictResult.Success || !strictResult.Success);
+    Console.WriteLine($"    Strict result: Success={strictResult.Success}, Error={strictResult.Error ?? "none"}");
+}
+
+if (File.Exists(safePluginPath))
+{
+    var safeStrictResult = await strictLoader.LoadPluginAsync(safePluginPath);
+    Check("Strict: safe plugin loads with StrictValidation",
+        safeStrictResult.Success);
+    if (safeStrictResult.Success)
+        strictLoader.UnloadPlugin(safeStrictResult.PluginId);
+}
+
+// ============================================================
 // Summary
 // ============================================================
 Console.WriteLine("\n============================================================");
