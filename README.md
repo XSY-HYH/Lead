@@ -14,6 +14,7 @@ Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ 
 
 - **Load Any Assembly** — no interface requirement, no format restriction; load any .NET DLL and execute it safely
 - **Static Analysis** — IL-level scanning detects unsafe code, P/Invoke, reflection, dynamic IL generation, and 40+ attack vectors; results are advisory by default, blockable via `StrictValidation`
+- **Runtime IL Rewriting** — self-built hook engine rewrites method calls at load time; `File.Delete` becomes `FileIOProxy.Delete`, `Process.Start` becomes `ProcessProxy.Start` — no Harmony, no native hooks, fully compatible with .NET 10
 - **Runtime Isolation** — `AssemblyLoadContext` blocks native DLL loading, restricts dangerous system assemblies, and isolates loaded code dependencies
 - **Virtualization** — Three modes for file/HTTP access:
   - `Block` — hard deny with error codes
@@ -22,6 +23,7 @@ Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ 
 - **Service Injection** — loaded code receives only the APIs you register; nothing else is accessible
 - **Resource Limits** — file size, I/O throughput, HTTP request count, execution timeout
 - **Custom Redirectors** — implement `IFileRedirector` / `IHttpResponder` to define your own virtualization logic
+- **Custom Hooks** — implement `IMethodHook` to define your own IL rewriting rules
 
 ## Quick Start
 
@@ -81,6 +83,59 @@ if (result.Success && result.Plugin != null)
 var config = new SandboxConfiguration
 {
     StrictValidation = true  // reject assemblies with unsafe code
+};
+```
+
+## Runtime IL Rewriting
+
+Lead's hook engine rewrites IL at load time using Mono.Cecil. When an assembly calls `File.Delete(path)`, the IL `call` instruction is rewritten to call `FileIOProxy.Delete(path)` instead. The proxy then decides what to do based on the current `RedirectMode`.
+
+**No Harmony, no native hooks, no runtime patching** — pure managed IL rewriting, fully compatible with .NET 10.
+
+### Built-in Hooks
+
+| Category | Original Method | Proxy Method | Effect (Honeypot) |
+|----------|----------------|-------------|-------------------|
+| FileIO | `File.Delete` | `FileIOProxy.Delete` | Silently recorded, no real deletion |
+| FileIO | `File.ReadAllText` | `FileIOProxy.ReadAllText` | Returns fake file content |
+| FileIO | `File.WriteAllText` | `FileIOProxy.WriteAllText` | Silently recorded |
+| FileIO | `File.Exists` | `FileIOProxy.Exists` | Returns virtual file existence |
+| Network | `HttpClient.GetStringAsync` | `NetworkProxy.GetStringAsync` | Returns fake HTTP response |
+| Process | `Process.Start` | `ProcessProxy.Start` | Silently recorded, no process spawned |
+| Process | `Process.Kill` | `ProcessProxy.Kill` | Silently recorded |
+| Reflection | `MethodInfo.Invoke` | `ReflectionProxy.Invoke` | Returns null |
+| Reflection | `Activator.CreateInstance` | `ReflectionProxy.CreateInstance` | Returns null or default |
+
+### Custom Hook
+
+```csharp
+using Lead.Hooks;
+
+public class MyCustomHook : IMethodHook
+{
+    public string Category => "Custom";
+
+    public IEnumerable<MethodHookRule> GetRules()
+    {
+        yield return new MethodHookRule(
+            "System.IO.File", "Copy",           // original method
+            typeof(MyProxy), "CopyFile",         // replacement method
+            "Hook File.Copy to sandbox VFS"
+        );
+    }
+}
+
+// Register
+config.HookDispatcher.Register(new MyCustomHook());
+config.EnableRuntimeHooks = true;
+```
+
+### Disable Hooks
+
+```csharp
+var config = new SandboxConfiguration
+{
+    EnableRuntimeHooks = false  // disable IL rewriting
 };
 ```
 

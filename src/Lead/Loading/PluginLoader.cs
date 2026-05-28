@@ -1,4 +1,6 @@
 using System.Reflection;
+using Lead.Hooks;
+using Lead.Hooks.Proxies;
 
 namespace Lead;
 
@@ -6,6 +8,7 @@ public class PluginLoader : IDisposable
 {
     private readonly SandboxConfiguration _config;
     private readonly AssemblyValidator _validator;
+    private readonly RuntimeHookManager? _hookManager;
     private readonly Dictionary<string, SandboxedAssemblyLoadContext> _loadedContexts = new();
     private readonly Dictionary<string, ISandboxedPlugin> _pluginInstances = new();
     private readonly Dictionary<string, Assembly> _loadedAssemblies = new();
@@ -14,6 +17,12 @@ public class PluginLoader : IDisposable
     {
         _config = config;
         _validator = new AssemblyValidator(config.SecurityPolicy);
+
+        if (config.EnableRuntimeHooks && config.HookDispatcher.GetAllRules().Count > 0)
+        {
+            _hookManager = new RuntimeHookManager(config.HookDispatcher);
+            ConfigureProxies();
+        }
     }
 
     public async Task<LoadResult> LoadPluginAsync(string dllPath, CancellationToken ct = default)
@@ -30,8 +39,8 @@ public class PluginLoader : IDisposable
                 return LoadResult.Failed(pluginId, errors);
             }
 
-            var loadContext = new SandboxedAssemblyLoadContext(dllPath, _config.SecurityPolicy);
-            var assembly = loadContext.LoadFromAssemblyPath(dllPath);
+            var loadContext = new SandboxedAssemblyLoadContext(dllPath, _config.SecurityPolicy, _hookManager);
+            var assembly = loadContext.LoadWithRewrite(dllPath);
 
             _loadedContexts[pluginId] = loadContext;
             _loadedAssemblies[pluginId] = assembly;
@@ -119,6 +128,8 @@ public class PluginLoader : IDisposable
         return _loadedAssemblies.TryGetValue(pluginId, out var asm) ? asm : null;
     }
 
+    public int GetHookRewriteCount() => _hookManager?.RewriteCount ?? 0;
+
     public void UnloadPlugin(string pluginId)
     {
         if (_pluginInstances.TryGetValue(pluginId, out var plugin))
@@ -163,5 +174,18 @@ public class PluginLoader : IDisposable
             context.InjectService<IHttpService>(new SandboxHttpService(_config));
 
         return context;
+    }
+
+    private void ConfigureProxies()
+    {
+        FileIOProxy.Mode = _config.FileRedirectMode;
+        FileIOProxy.Redirector = _config.FileRedirector;
+        FileIOProxy.SandboxRoot = _config.SandboxRootDirectory;
+
+        NetworkProxy.Mode = _config.HttpRedirectMode;
+        NetworkProxy.Responder = _config.HttpResponder;
+
+        ProcessProxy.Mode = _config.FileRedirectMode;
+        ReflectionProxy.Mode = _config.FileRedirectMode;
     }
 }

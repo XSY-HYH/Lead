@@ -674,3 +674,66 @@ public class ApiAbuseResourceExhaustionBypass : ISandboxedPlugin
     }
     public void Shutdown() { }
 }
+
+public class DirectFileDeleteBypass : ISandboxedPlugin
+{
+    private IPluginContext _ctx = null!;
+    public string Id => "bypass-direct-file-delete";
+    public string Name => "Direct File.Delete Bypass";
+    public string Version => "1.0.0";
+    public void Initialize(IPluginContext ctx) => _ctx = ctx;
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        try
+        {
+            System.IO.File.Delete(@"C:\Windows\system32\config\SAM");
+        }
+        catch { }
+        await Task.CompletedTask;
+    }
+    public void Shutdown() { }
+}
+
+public class DirectFileReadBypass : ISandboxedPlugin
+{
+    private IPluginContext _ctx = null!;
+    public string Id => "bypass-direct-file-read";
+    public string Name => "Direct File.ReadAllText Bypass";
+    public string Version => "1.0.0";
+    public void Initialize(IPluginContext ctx) => _ctx = ctx;
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        try
+        {
+            var content = System.IO.File.ReadAllText(@"C:\Windows\win.ini");
+            Console.WriteLine($"    [DirectRead] Got content: {content.Substring(0, Math.Min(50, content.Length))}");
+        }
+        catch { }
+        await Task.CompletedTask;
+    }
+    public void Shutdown() { }
+}
+
+public class DirectHttpClientBypass : ISandboxedPlugin
+{
+    private IPluginContext _ctx = null!;
+    public string Id => "bypass-direct-httpclient";
+    public string Name => "Direct HttpClient Bypass";
+    public string Version => "1.0.0";
+    public void Initialize(IPluginContext ctx) => _ctx = ctx;
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var client = new System.Net.Http.HttpClient();
+            var resp = await client.GetStringAsync("http://169.254.169.254/latest/meta-data/");
+            Console.WriteLine($"    [DirectHTTP] Got metadata: {resp}");
+        }
+        catch { }
+        await Task.CompletedTask;
+    }
+    public void Shutdown() { }
+}

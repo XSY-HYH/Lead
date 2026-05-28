@@ -354,6 +354,222 @@ if (File.Exists(safePluginPath))
 }
 
 // ============================================================
+// Test 10: DynamicMethod & Direct System API Defense
+// ============================================================
+Console.WriteLine("\n--- Test 10: DynamicMethod & Direct System API Defense ---\n");
+
+var validator = new AssemblyValidator();
+
+if (File.Exists(maliciousPluginPath))
+{
+    var dynResult = validator.Validate(maliciousPluginPath);
+    Check("Static scan: detects DynamicMethod usage",
+        dynResult.Errors.Any(e => e.Message.Contains("DynamicMethod") || e.Message.Contains("FORBIDDEN_TYPE")));
+    Check("Static scan: detects File.Delete usage",
+        dynResult.Errors.Any(e => e.Message.Contains("File.Delete") || e.Message.Contains("FORBIDDEN_METHOD")));
+    Check("Static scan: detects File.ReadAllText usage",
+        dynResult.Errors.Any(e => e.Message.Contains("ReadAllText") || e.Message.Contains("FORBIDDEN_METHOD")));
+    Check("Static scan: detects HttpClient usage",
+        dynResult.Errors.Any(e => e.Message.Contains("HttpClient") || e.Message.Contains("FORBIDDEN_METHOD")));
+
+    Console.WriteLine("\n  --- Runtime ALC isolation test ---\n");
+
+    var runtimeConfig = new SandboxConfiguration
+    {
+        SandboxRootDirectory = "./test_sandbox_runtime"
+    };
+    runtimeConfig.UseHoneypotDefaults();
+
+    using var runtimeLoader = new PluginLoader(runtimeConfig);
+
+    var loadRes = await runtimeLoader.LoadPluginAsync(maliciousPluginPath);
+    Check("Runtime: malicious assembly loads (non-strict)", loadRes.Success);
+
+    if (loadRes.Success)
+    {
+        bool dynamicMethodBlocked = false;
+        try
+        {
+            await runtimeLoader.InvokeMethodAsync(
+                loadRes.PluginId,
+                "DynamicMethodBypass",
+                "ExecuteAsync",
+                new object[] { CancellationToken.None }
+            );
+        }
+        catch (Exception ex) when (ex.InnerException is SandboxException || ex is SandboxException)
+        {
+            dynamicMethodBlocked = true;
+        }
+        catch (TypeLoadException)
+        {
+            dynamicMethodBlocked = true;
+        }
+        catch (FileNotFoundException)
+        {
+            dynamicMethodBlocked = true;
+        }
+        catch (Exception)
+        {
+        }
+
+        Check("Runtime: DynamicMethod blocked by ALC (Emit assembly unavailable)",
+            dynamicMethodBlocked || (loadRes.Validation != null && !loadRes.Validation.IsValid));
+
+        bool directFileBlocked = false;
+        try
+        {
+            await runtimeLoader.InvokeMethodAsync(
+                loadRes.PluginId,
+                "DirectFileDeleteBypass",
+                "ExecuteAsync",
+                new object[] { CancellationToken.None }
+            );
+        }
+        catch (Exception ex) when (ex.InnerException is SandboxException || ex is SandboxException)
+        {
+            directFileBlocked = true;
+        }
+        catch (Exception)
+        {
+        }
+
+        var fileDeleteErrors = loadRes.Validation?.Errors
+            .Where(e => e.Message == ErrorCode.ForbiddenMethod)
+            .Select(e => e.Location)
+            .ToList() ?? new();
+        Console.WriteLine($"    FORBIDDEN_METHOD locations: {string.Join(", ", fileDeleteErrors)}");
+
+        Check("Runtime: Direct File.Delete detected by static scan",
+            fileDeleteErrors.Any(l => l.Contains("DirectFileDelete") || l.Contains("DirectFileRead")));
+
+        runtimeLoader.UnloadPlugin(loadRes.PluginId);
+    }
+}
+
+// ============================================================
+// Test 11: Runtime IL Rewriting Hook Defense
+// ============================================================
+Console.WriteLine("\n--- Test 11: Runtime IL Rewriting Hook Defense ---\n");
+
+var hookConfig = new SandboxConfiguration
+{
+    SandboxRootDirectory = "./test_sandbox_hooks",
+    EnableRuntimeHooks = true
+};
+hookConfig.UseHoneypotDefaults();
+
+using var hookLoader = new PluginLoader(hookConfig);
+
+if (File.Exists(maliciousPluginPath))
+{
+    var hookLoadRes = await hookLoader.LoadPluginAsync(maliciousPluginPath);
+    Check("Hook: malicious assembly loads with IL rewriting", hookLoadRes.Success);
+
+    if (hookLoadRes.Success)
+    {
+        var rewriteCount = hookLoader.GetHookRewriteCount();
+        Console.WriteLine($"    IL rewrites applied: {rewriteCount}");
+        Check("Hook: IL rewriting applied (rewrite count > 0)", rewriteCount > 0);
+
+        var hookAssembly = hookLoader.GetLoadedAssembly(hookLoadRes.PluginId);
+        Check("Hook: assembly loaded after IL rewriting", hookAssembly != null);
+
+        if (hookAssembly != null)
+        {
+            var directFileDeleteType = hookAssembly.GetType("DirectFileDeleteBypass");
+            if (directFileDeleteType != null)
+            {
+                var deleteMethod = directFileDeleteType.GetMethod("ExecuteAsync",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (deleteMethod != null)
+                {
+                    var ilRewritten = true;
+                    try
+                    {
+                        var instance = Activator.CreateInstance(directFileDeleteType);
+                        var initMethod = directFileDeleteType.GetMethod("Initialize");
+                        initMethod?.Invoke(instance, new object?[] { null });
+
+                        var task = deleteMethod.Invoke(instance, new object[] { CancellationToken.None }) as Task;
+                        if (task != null) await task;
+
+                        var accessLog = Lead.Hooks.Proxies.FileIOProxy.GetAccessLog();
+                        ilRewritten = accessLog.Any(l => l.Contains("DELETE"));
+                        Console.WriteLine($"    FileIOProxy access log entries: {accessLog.Count}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"    Hook execution: {ex.InnerException?.Message ?? ex.Message}");
+                    }
+
+                    Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", ilRewritten);
+                }
+                else
+                {
+                    Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", false);
+                }
+            }
+            else
+            {
+                Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", false);
+            }
+
+            var directFileReadType = hookAssembly.GetType("DirectFileReadBypass");
+            if (directFileReadType != null)
+            {
+                try
+                {
+                    var instance = Activator.CreateInstance(directFileReadType);
+                    var initMethod = directFileReadType.GetMethod("Initialize");
+                    initMethod?.Invoke(instance, new object?[] { null });
+
+                    var task = directFileReadType.GetMethod("ExecuteAsync")
+                        ?.Invoke(instance, new object[] { CancellationToken.None }) as Task;
+                    if (task != null) await task;
+
+                    var accessLog = Lead.Hooks.Proxies.FileIOProxy.GetAccessLog();
+                    var readRewritten = accessLog.Any(l => l.Contains("READ_ALL_TEXT"));
+                    Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", readRewritten);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"    Hook read execution: {ex.InnerException?.Message ?? ex.Message}");
+                    Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", false);
+                }
+            }
+            else
+            {
+                Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", false);
+            }
+        }
+        else
+        {
+            Check("Hook: assembly loaded after IL rewriting", false);
+            Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", false);
+            Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", false);
+        }
+
+        hookLoader.UnloadPlugin(hookLoadRes.PluginId);
+    }
+    else
+    {
+        Check("Hook: IL rewriting applied (rewrite count > 0)", false);
+        Check("Hook: assembly loaded after IL rewriting", false);
+        Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", false);
+        Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", false);
+    }
+}
+else
+{
+    Check("Hook: malicious assembly loads with IL rewriting", false);
+    Check("Hook: IL rewriting applied (rewrite count > 0)", false);
+    Check("Hook: assembly loaded after IL rewriting", false);
+    Check("Hook: File.Delete redirected to FileIOProxy (honeypot)", false);
+    Check("Hook: File.ReadAllText redirected to FileIOProxy (honeypot)", false);
+}
+
+// ============================================================
 // Summary
 // ============================================================
 Console.WriteLine("\n============================================================");

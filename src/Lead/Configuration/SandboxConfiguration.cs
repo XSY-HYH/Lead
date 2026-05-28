@@ -1,3 +1,6 @@
+using Lead.Hooks;
+using Lead.Hooks.BuiltIn;
+
 namespace Lead;
 
 public class SandboxConfiguration
@@ -27,6 +30,10 @@ public class SandboxConfiguration
 
     public bool StrictValidation { get; set; } = false;
 
+    public bool EnableRuntimeHooks { get; set; } = true;
+
+    public MethodHookDispatcher HookDispatcher { get; } = new();
+
     public Dictionary<string, Dictionary<string, object>> PluginConfigs { get; set; } = new();
 
     private readonly Dictionary<Type, object> _services = new();
@@ -47,6 +54,9 @@ public class SandboxConfiguration
         HttpRedirectMode = RedirectMode.Honeypot;
         HttpResponder ??= new HoneypotHttpResponder();
 
+        EnableRuntimeHooks = true;
+        RegisterDefaultHooks();
+
         return this;
     }
 
@@ -58,6 +68,9 @@ public class SandboxConfiguration
         HttpRedirectMode = RedirectMode.Redirect;
         HttpResponder ??= new HoneypotHttpResponder();
 
+        EnableRuntimeHooks = true;
+        RegisterDefaultHooks();
+
         return this;
     }
 
@@ -66,6 +79,20 @@ public class SandboxConfiguration
         FileRedirectMode = RedirectMode.Block;
         HttpRedirectMode = RedirectMode.Block;
 
+        EnableRuntimeHooks = true;
+        RegisterDefaultHooks();
+
         return this;
+    }
+
+    private void RegisterDefaultHooks()
+    {
+        HookDispatcher.Register(new IMethodHook[]
+        {
+            new FileIOMethodHook(),
+            new NetworkMethodHook(),
+            new ProcessMethodHook(),
+            new ReflectionMethodHook()
+        });
     }
 }

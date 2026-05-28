@@ -49,6 +49,7 @@ if (result.Success)
 | `ExecutePluginAsync(id)` | Execute a loaded `ISandboxedPlugin` assembly |
 | `InvokeMethodAsync(id, type, method, args)` | Invoke a method by name on a loaded assembly |
 | `GetLoadedAssembly(id)` | Get the `Assembly` object for reflection |
+| `GetHookRewriteCount()` | Get number of IL rewrites applied during loading |
 | `UnloadPlugin(id)` | Unload and collect the assembly |
 
 ### LoadResult
@@ -71,6 +72,110 @@ public class LoadResult
 
 ---
 
+## Runtime IL Rewriting (Hook Engine)
+
+Lead's hook engine rewrites IL method calls at load time using Mono.Cecil. When an assembly calls `File.Delete(path)`, the `call` instruction is rewritten to `FileIOProxy.Delete(path)`. No Harmony, no native hooks — pure managed IL rewriting.
+
+### IMethodHook
+
+Define custom hook rules by implementing this interface.
+
+```csharp
+public interface IMethodHook
+{
+    string Category { get; }
+    IEnumerable<MethodHookRule> GetRules();
+}
+```
+
+### MethodHookRule
+
+A single hook rule: original method → proxy method.
+
+```csharp
+public class MethodHookRule
+{
+    public string OriginalType { get; }      // e.g. "System.IO.File"
+    public string OriginalMethod { get; }    // e.g. "Delete"
+    public Type ProxyType { get; }           // e.g. typeof(FileIOProxy)
+    public string ProxyMethod { get; }       // e.g. "Delete"
+    public string? Description { get; }
+}
+```
+
+### MethodHookDispatcher
+
+Manages all hook rules and provides lookup.
+
+```csharp
+var dispatcher = new MethodHookDispatcher();
+dispatcher.Register(new FileIOMethodHook());
+dispatcher.Register(new[] { new ProcessMethodHook(), new ReflectionMethodHook() });
+
+// Lookup
+var rule = dispatcher.FindRule("System.IO.File", "Delete");
+var allRules = dispatcher.GetAllRules();
+var fileRules = dispatcher.GetRulesByCategory("FileIO");
+```
+
+### RuntimeHookManager
+
+Core engine that performs IL rewriting. Called automatically by `PluginLoader` when `EnableRuntimeHooks = true`.
+
+```csharp
+var manager = new RuntimeHookManager(dispatcher);
+var rewrittenBytes = manager.RewriteAssembly("plugin.dll");
+// or
+var rewrittenBytes = manager.RewriteAssembly(originalBytes);
+
+int count = manager.RewriteCount;  // number of call instructions rewritten
+```
+
+### Built-in Hooks
+
+| Hook Class | Category | Methods Hooked |
+|------------|----------|---------------|
+| `FileIOMethodHook` | FileIO | `File.Delete`, `File.ReadAllText`, `File.ReadAllBytes`, `File.WriteAllText`, `File.WriteAllBytes`, `File.Exists`, `File.ReadLines`, `File.AppendAllText` |
+| `NetworkMethodHook` | Network | `HttpClient.GetStringAsync` |
+| `ProcessMethodHook` | Process | `Process.Start`, `Process.Kill` |
+| `ReflectionMethodHook` | Reflection | `MethodInfo.Invoke`, `Activator.CreateInstance` |
+
+### Proxy Classes
+
+| Proxy | Behavior by Mode |
+|-------|-----------------|
+| `FileIOProxy` | Block: throws; Redirect: maps to VFS; Honeypot: returns fake data / silently records |
+| `NetworkProxy` | Block: throws; Honeypot: returns fake HTTP response |
+| `ProcessProxy` | Block: throws; Honeypot: silently records (no process spawned) |
+| `ReflectionProxy` | Block: throws; Honeypot: returns null |
+
+Each proxy exposes a `GetAccessLog()` / `GetRequestLog()` method for auditing.
+
+### Custom Hook Example
+
+```csharp
+using Lead.Hooks;
+
+public class RegistryHook : IMethodHook
+{
+    public string Category => "Registry";
+
+    public IEnumerable<MethodHookRule> GetRules()
+    {
+        yield return new MethodHookRule(
+            "Microsoft.Win32.Registry", "GetValue",
+            typeof(RegistryProxy), "GetValue",
+            "Hook Registry.GetValue to return fake data"
+        );
+    }
+}
+
+// Register
+config.HookDispatcher.Register(new RegistryHook());
+```
+
+---
+
 ## Optional Interface
 
 ### ISandboxedPlugin
@@ -89,15 +194,6 @@ public interface ISandboxedPlugin
 }
 ```
 
-| Member | Description |
-|--------|-------------|
-| `Id` | Unique identifier |
-| `Name` | Human-readable name |
-| `Version` | Semantic version string |
-| `Initialize` | Called once after loading; receives the sandboxed context |
-| `ExecuteAsync` | Main entry point |
-| `Shutdown` | Called before unloading |
-
 ### IPluginContext
 
 The sandboxed context provided to `ISandboxedPlugin` implementations.
@@ -115,15 +211,6 @@ public interface IPluginContext
     event EventHandler<int> ProgressReported;
 }
 ```
-
-| Member | Description |
-|--------|-------------|
-| `GetService<T>` | Retrieve an injected service (e.g. `IFileService`, `IHttpService`) |
-| `HasService<T>` | Check if a service is available |
-| `GetConfigValue<T>` | Read per-assembly configuration |
-| `CheckCancellation` | Throw if the host has requested cancellation |
-| `ReportProgress` | Report 0-100 progress to the host |
-| `RequestMoreTime` | Extend execution timeout (max 5 minutes) |
 
 ---
 
@@ -146,14 +233,6 @@ public interface IFileService
 }
 ```
 
-Behavior depends on `RedirectMode`:
-
-| Mode | Relative path | Absolute/traversal path |
-|------|--------------|------------------------|
-| `Block` | Normal sandbox I/O | Throws `PATH_TRAVERSAL` |
-| `Redirect` | Normal sandbox I/O | Remapped to VFS |
-| `Honeypot` | Normal sandbox I/O | Returns fake data, logs access |
-
 ### IHttpService
 
 HTTP access API available to loaded code.
@@ -165,14 +244,6 @@ public interface IHttpService
     Task<string> HttpPostAsync(string url, string body, string contentType = "application/json", CancellationToken ct = default);
 }
 ```
-
-Behavior depends on `RedirectMode`:
-
-| Mode | Whitelisted URL | Non-whitelisted/private URL |
-|------|----------------|---------------------------|
-| `Block` | Real HTTP request | Throws `FORBIDDEN_URL` / `PRIVATE_IP` |
-| `Redirect` | Real HTTP request | Redirected to safe target or fake response |
-| `Honeypot` | Real HTTP request | Returns fake response, logs request |
 
 ---
 
@@ -203,15 +274,9 @@ Default implementation with built-in virtual files for common system paths.
 
 ```csharp
 var redirector = new VirtualFileRedirector();
-
-// Add custom virtual files
 redirector.AddVirtualFile(@"C:\Secret\db.txt", "connection string here");
 redirector.AddVirtualBinaryFile(@"C:\Secret\key.pem", keyBytes);
-
-// Add path mappings (for Redirect mode)
 redirector.AddPathMapping(@"C:\Secret", "secret");
-
-// Audit access log
 var log = redirector.GetAccessLog();
 ```
 
@@ -233,12 +298,8 @@ Default implementation with built-in fake responses for cloud metadata endpoints
 
 ```csharp
 var responder = new HoneypotHttpResponder();
-
-// Add custom responses
 responder.AddResponder("http://internal-api/users", fakeJson);
 responder.AddResponder("http://internal-api/admin", resp => GenerateFakeResponse());
-
-// Audit request log
 var log = responder.GetRequestLog();
 ```
 
@@ -258,9 +319,9 @@ var config = new SandboxConfiguration
 
     // Resource limits
     MaxExecutionSeconds = 30,
-    MaxFileSize = 10 * 1024 * 1024,        // 10 MB
-    MaxBytesRead = 100 * 1024 * 1024,       // 100 MB
-    MaxBytesWritten = 50 * 1024 * 1024,     // 50 MB
+    MaxFileSize = 10 * 1024 * 1024,
+    MaxBytesRead = 100 * 1024 * 1024,
+    MaxBytesWritten = 50 * 1024 * 1024,
     MaxHttpRequests = 100,
     HttpTimeoutSeconds = 10,
 
@@ -274,27 +335,32 @@ var config = new SandboxConfiguration
     HttpResponder = new HoneypotHttpResponder(),
     HttpRedirectTargets = new() { [@"^http://evil\.com/"] = "https://safe-sink.example.com/log" },
 
+    // Runtime hooks
+    EnableRuntimeHooks = true,
+    // HookDispatcher is pre-populated by UseHoneypotDefaults() etc.
+    // Add custom hooks: config.HookDispatcher.Register(new MyHook());
+
     // Security
     SecurityPolicy = new SecurityPolicy(),
-    StrictValidation = false    // true = reject unsafe assemblies; false = advisory only
+    StrictValidation = false
 };
 ```
 
 ### Preset Configurations
 
 ```csharp
-config.UseHoneypotDefaults();   // Honeypot mode with default redirectors
-config.UseRedirectDefaults();   // Redirect mode with default redirectors
-config.UseBlockDefaults();      // Block mode (hard deny)
+config.UseHoneypotDefaults();   // Honeypot mode + default hooks + default redirectors
+config.UseRedirectDefaults();   // Redirect mode + default hooks + default redirectors
+config.UseBlockDefaults();      // Block mode + default hooks
 ```
+
+All presets enable `EnableRuntimeHooks = true` and register the four built-in hooks (FileIO, Network, Process, Reflection).
 
 ### Service Injection
 
 ```csharp
 config.RegisterService<IMyService>(new MyServiceImpl());
 ```
-
-`ISandboxedPlugin` implementations access injected services via `IPluginContext.GetService<T>()`.
 
 ---
 
@@ -306,10 +372,8 @@ Controls static analysis rules.
 
 ```csharp
 var policy = new SecurityPolicy();
-
-// Customize forbidden types/methods/attributes
 policy.AddForbiddenType("System.Diagnostics.Process");
-policy.AddForbiddenMethod("System.Reflection.MethodInfo.Invoke");
+policy.AddForbiddenMethod("System.IO.File.Delete");
 policy.AddForbiddenAttribute("System.Runtime.InteropServices.StructLayoutAttribute");
 ```
 
@@ -319,15 +383,19 @@ Default forbidden categories:
 - Reflection (MethodInfo.Invoke, Activator, etc.)
 - Dynamic IL generation (DynamicMethod, AssemblyBuilder)
 - Process spawning
+- Direct file I/O (File.Delete, File.ReadAllText, etc.)
+- Direct HTTP (HttpClient constructors)
+- Registry access
 - StructLayout / FieldOffset / UnmanagedCallersOnly
 - MemoryMarshal reinterpret operations
 - Thread pool manipulation
 
 ### StrictValidation
 
-By default (`StrictValidation = false`), static analysis results are **advisory** — assemblies load regardless of violations, and `LoadResult.Validation` contains the findings for the host to review.
-
-When `StrictValidation = true`, assemblies with validation errors are **rejected** and will not load.
+| Value | Behavior |
+|-------|----------|
+| `false` (default) | Static analysis is advisory; assemblies load regardless; `LoadResult.Validation` contains findings |
+| `true` | Assemblies with validation errors are rejected and will not load |
 
 ### RedirectMode
 
@@ -342,13 +410,12 @@ public enum RedirectMode
 
 ### Error Codes
 
-All errors use string codes, not numeric values:
-
 | Code | Description |
 |------|-------------|
 | `FORBIDDEN_TYPE` | Type blocked by security policy |
 | `FORBIDDEN_METHOD` | Method blocked by security policy |
 | `FORBIDDEN_ATTRIBUTE` | Attribute blocked by security policy |
+| `FORBIDDEN_ASSEMBLY` | Assembly blocked by ALC |
 | `UNSAFE_CODE` | Unsafe code detected |
 | `PINVOKE` | P/Invoke call detected |
 | `PATH_TRAVERSAL` | Path traversal attempt |
@@ -363,3 +430,6 @@ All errors use string codes, not numeric values:
 | `WRITE_LIMIT_EXCEEDED` | Write I/O limit exceeded |
 | `HTTP_LIMIT_EXCEEDED` | HTTP request limit exceeded |
 | `SERVICE_NOT_FOUND` | Requested service not injected |
+| `PLUGIN_NOT_FOUND` | Plugin ID not found |
+| `PLUGIN_TYPE_NOT_FOUND` | Type not found in loaded assembly |
+| `PLUGIN_LOAD_FAILED` | General load failure |

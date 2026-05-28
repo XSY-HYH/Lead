@@ -149,6 +149,12 @@ public class AssemblyValidator
                     errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.ForbiddenMethod, Severity.Error));
                 }
 
+                var shortName = target.DeclaringType != null ? $"{target.DeclaringType.FullName}.{target.Name}" : target.Name;
+                if (_policy.ForbiddenMethods.Contains(shortName))
+                {
+                    errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.ForbiddenMethod, Severity.Error));
+                }
+
                 if (target.DeclaringType != null && _policy.ForbiddenTypes.Contains(target.DeclaringType.FullName))
                 {
                     errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.ForbiddenType, Severity.Error));
@@ -167,6 +173,12 @@ public class AssemblyValidator
                     if (_policy.ForbiddenTypes.Contains(ctor.DeclaringType.FullName))
                     {
                         errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.ForbiddenType, Severity.Error));
+                    }
+
+                    var ctorShortName = $"{ctor.DeclaringType.FullName}.{ctor.Name}";
+                    if (_policy.ForbiddenMethods.Contains(ctorShortName))
+                    {
+                        errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.ForbiddenMethod, Severity.Error));
                     }
                 }
             }
