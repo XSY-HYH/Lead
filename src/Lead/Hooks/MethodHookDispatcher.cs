@@ -21,6 +21,7 @@ public class MethodHookDispatcher
     {
         EnsureCache();
         var key = $"{typeFullName}::{methodName}";
+
         if (_ruleCache!.TryGetValue(key, out var rules) && rules.Count > 0)
             return rules[0];
         return null;

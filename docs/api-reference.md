@@ -136,6 +136,7 @@ int count = manager.RewriteCount;  // number of call instructions rewritten
 | Hook Class | Category | Methods Hooked |
 |------------|----------|---------------|
 | `FileIOMethodHook` | FileIO | `File.Delete`, `File.ReadAllText`, `File.ReadAllBytes`, `File.WriteAllText`, `File.WriteAllBytes`, `File.Exists`, `File.ReadLines`, `File.AppendAllText` |
+| `AssemblyLoadFromMethodHook` | AssemblyLoading | `Assembly.LoadFrom`, `Assembly.Load` |
 | `NetworkMethodHook` | Network | `HttpClient.GetStringAsync` |
 | `ProcessMethodHook` | Process | `Process.Start`, `Process.Kill` |
 | `ReflectionMethodHook` | Reflection | `MethodInfo.Invoke`, `Activator.CreateInstance` |
@@ -145,6 +146,7 @@ int count = manager.RewriteCount;  // number of call instructions rewritten
 | Proxy | Behavior by Mode |
 |-------|-----------------|
 | `FileIOProxy` | Block: throws; Redirect: maps to VFS; Honeypot: returns fake data / silently records |
+| `AssemblyLoadFromProxy` | Loads through sandbox ALC with IL rewriting; can be disabled via `AllowAssemblyLoadFrom = false` |
 | `NetworkProxy` | Block: throws; Honeypot: returns fake HTTP response |
 | `ProcessProxy` | Block: throws; Honeypot: silently records (no process spawned) |
 | `ReflectionProxy` | Block: throws; Honeypot: returns null |
@@ -337,6 +339,7 @@ var config = new SandboxConfiguration
 
     // Runtime hooks
     EnableRuntimeHooks = true,
+    AllowAssemblyLoadFrom = true,
     // HookDispatcher is pre-populated by UseHoneypotDefaults() etc.
     // Add custom hooks: config.HookDispatcher.Register(new MyHook());
 
@@ -354,7 +357,7 @@ config.UseRedirectDefaults();   // Redirect mode + default hooks + default redir
 config.UseBlockDefaults();      // Block mode + default hooks
 ```
 
-All presets enable `EnableRuntimeHooks = true` and register the four built-in hooks (FileIO, Network, Process, Reflection).
+All presets enable `EnableRuntimeHooks = true` and register the five built-in hooks (FileIO, AssemblyLoading, Network, Process, Reflection).
 
 ### Service Injection
 

@@ -31,6 +31,6 @@ test_sandbox*/
 sandbox_data/
 net10_test_sandbox*/
 tools/
-
+error.log
 ## Trae
 .trae/

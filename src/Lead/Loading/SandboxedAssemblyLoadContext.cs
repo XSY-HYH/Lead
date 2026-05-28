@@ -42,16 +42,9 @@ public class SandboxedAssemblyLoadContext : AssemblyLoadContext
     {
         if (_hookManager != null)
         {
-            try
-            {
-                var rewritten = _hookManager.RewriteAssembly(assemblyPath);
-                using var stream = new MemoryStream(rewritten);
-                return LoadFromStream(stream);
-            }
-            catch
-            {
-                return LoadFromAssemblyPath(assemblyPath);
-            }
+            var rewritten = _hookManager.RewriteAssembly(assemblyPath);
+            using var stream = new MemoryStream(rewritten);
+            return LoadFromStream(stream);
         }
 
         return LoadFromAssemblyPath(assemblyPath);
@@ -69,7 +62,20 @@ public class SandboxedAssemblyLoadContext : AssemblyLoadContext
             throw new SandboxException(ErrorCode.ForbiddenAssembly);
         }
 
-        return Default.LoadFromAssemblyName(assemblyName);
+        var resolved = _resolver.ResolveAssemblyToPath(assemblyName);
+        if (resolved != null)
+        {
+            return LoadFromAssemblyPath(resolved);
+        }
+
+        try
+        {
+            return Default.LoadFromAssemblyName(assemblyName);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
