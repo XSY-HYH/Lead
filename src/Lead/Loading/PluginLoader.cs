@@ -45,6 +45,14 @@ public class PluginLoader : IDisposable
             _loadedContexts[pluginId] = loadContext;
             _loadedAssemblies[pluginId] = assembly;
 
+            if (_hookManager != null)
+            {
+                AssemblyLoadFromProxy.CurrentContext = loadContext;
+                AssemblyLoadFromProxy.HookManager = _hookManager;
+                AssemblyLoadFromProxy.Policy = _config.SecurityPolicy;
+                AssemblyLoadFromProxy.Allowed = _config.AllowAssemblyLoadFrom;
+            }
+
             var pluginType = FindPluginType(assembly);
             if (pluginType != null)
             {

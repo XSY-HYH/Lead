@@ -30,6 +30,7 @@ publish/
 test_sandbox*/
 sandbox_data/
 net10_test_sandbox*/
+tools/
 
 ## Trae
 .trae/

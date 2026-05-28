@@ -32,6 +32,8 @@ public class SandboxConfiguration
 
     public bool EnableRuntimeHooks { get; set; } = true;
 
+    public bool AllowAssemblyLoadFrom { get; set; } = true;
+
     public MethodHookDispatcher HookDispatcher { get; } = new();
 
     public Dictionary<string, Dictionary<string, object>> PluginConfigs { get; set; } = new();
@@ -92,7 +94,8 @@ public class SandboxConfiguration
             new FileIOMethodHook(),
             new NetworkMethodHook(),
             new ProcessMethodHook(),
-            new ReflectionMethodHook()
+            new ReflectionMethodHook(),
+            new AssemblyLoadFromMethodHook()
         });
     }
 }

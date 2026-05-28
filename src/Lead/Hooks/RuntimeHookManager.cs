@@ -94,6 +94,9 @@ public class RuntimeHookManager
             if (proxyRef == null)
                 continue;
 
+            if (target.Parameters.Count != proxyRef.Parameters.Count)
+                continue;
+
             var newCall = il.Create(OpCodes.Call, proxyRef);
             il.Replace(instr, newCall);
             _rewriteCount++;
@@ -109,8 +112,14 @@ public class RuntimeHookManager
         if (proxyType == null)
             return null;
 
-        var proxyMethodInfo = proxyType.GetMethod(rule.ProxyMethod,
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        var paramCount = originalCall.Parameters.Count;
+        var proxyMethodInfo = proxyType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .FirstOrDefault(m => m.Name == rule.ProxyMethod && m.GetParameters().Length == paramCount);
+        if (proxyMethodInfo == null)
+        {
+            proxyMethodInfo = proxyType.GetMethod(rule.ProxyMethod,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        }
         if (proxyMethodInfo == null)
             return null;
 
@@ -147,17 +156,25 @@ public class RuntimeHookManager
         if (type == typeof(byte[])) return new ArrayType(module.TypeSystem.Byte);
         if (type == typeof(object)) return module.TypeSystem.Object;
 
-        if (type.IsGenericType)
+        try
         {
-            var genericDef = type.GetGenericTypeDefinition();
-            var elemRef = new TypeReference(genericDef.Namespace, genericDef.Name, module, asmRef);
-            var genInst = new GenericInstanceType(elemRef);
-            foreach (var arg in type.GetGenericArguments())
-                genInst.GenericArguments.Add(ImportType(arg, module, asmRef));
-            return genInst;
+            var imported = module.ImportReference(type);
+            return imported;
         }
+        catch
+        {
+            if (type.IsGenericType)
+            {
+                var genericDef = type.GetGenericTypeDefinition();
+                var elemRef = new TypeReference(genericDef.Namespace, genericDef.Name, module, asmRef);
+                var genInst = new GenericInstanceType(elemRef);
+                foreach (var arg in type.GetGenericArguments())
+                    genInst.GenericArguments.Add(ImportType(arg, module, asmRef));
+                return genInst;
+            }
 
-        return new TypeReference(type.Namespace, type.Name, module, asmRef);
+            return new TypeReference(type.Namespace, type.Name, module, asmRef);
+        }
     }
 
     private void PreloadProxyAssemblies()

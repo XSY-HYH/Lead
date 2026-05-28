@@ -24,6 +24,23 @@ public static class NetworkProxy
         }
     }
 
+    public static async Task<string> GetStringAsync(string url)
+    {
+        RecordRequest("GET", url);
+        switch (Mode)
+        {
+            case RedirectMode.Block:
+                throw new SandboxException(ErrorCode.ForbiddenUrl);
+            case RedirectMode.Honeypot:
+                var response = Responder != null
+                    ? await Responder.GetResponseAsync(url, "GET")
+                    : "{}";
+                return response;
+            default:
+                return "{}";
+        }
+    }
+
     private static void RecordRequest(string method, string url)
     {
         RequestLog.Add($"[{DateTime.Now:HH:mm:ss}] {method} -> {url}");

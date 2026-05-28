@@ -100,6 +100,8 @@ Lead's hook engine rewrites IL at load time using Mono.Cecil. When an assembly c
 | FileIO | `File.ReadAllText` | `FileIOProxy.ReadAllText` | Returns fake file content |
 | FileIO | `File.WriteAllText` | `FileIOProxy.WriteAllText` | Silently recorded |
 | FileIO | `File.Exists` | `FileIOProxy.Exists` | Returns virtual file existence |
+| AssemblyLoading | `Assembly.LoadFrom` | `AssemblyLoadFromProxy.LoadFrom` | Loads through sandbox ALC with IL rewriting |
+| AssemblyLoading | `Assembly.Load` | `AssemblyLoadFromProxy.Load` | Loads through sandbox ALC, checks blocked prefixes |
 | Network | `HttpClient.GetStringAsync` | `NetworkProxy.GetStringAsync` | Returns fake HTTP response |
 | Process | `Process.Start` | `ProcessProxy.Start` | Silently recorded, no process spawned |
 | Process | `Process.Kill` | `ProcessProxy.Kill` | Silently recorded |
@@ -138,6 +140,17 @@ var config = new SandboxConfiguration
     EnableRuntimeHooks = false  // disable IL rewriting
 };
 ```
+
+### Control Assembly.LoadFrom
+
+```csharp
+var config = new SandboxConfiguration
+{
+    AllowAssemblyLoadFrom = false  // block Assembly.LoadFrom / Assembly.Load entirely
+};
+```
+
+When `AllowAssemblyLoadFrom = true` (default), `Assembly.LoadFrom` and `Assembly.Load` calls from sandboxed code are redirected to `AssemblyLoadFromProxy`, which loads the new assembly through the same sandbox ALC with IL rewriting applied. This ensures that dynamically loaded assemblies inherit the sandbox restrictions and cannot bypass the hook engine.
 
 ## Implementing ISandboxedPlugin (Optional)
 

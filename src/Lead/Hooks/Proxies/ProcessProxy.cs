@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Lead.Hooks.Proxies;
 
 public static class ProcessProxy
@@ -15,6 +17,48 @@ public static class ProcessProxy
                 throw new SandboxException(ErrorCode.ForbiddenType);
             case RedirectMode.Honeypot:
                 break;
+        }
+    }
+
+    public static Process? Start(string fileName, string arguments)
+    {
+        RecordAccess($"PROCESS_START({fileName}, {arguments})");
+        switch (Mode)
+        {
+            case RedirectMode.Block:
+                throw new SandboxException(ErrorCode.ForbiddenType);
+            case RedirectMode.Honeypot:
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    public static Process? Start(string fileName)
+    {
+        RecordAccess($"PROCESS_START({fileName})");
+        switch (Mode)
+        {
+            case RedirectMode.Block:
+                throw new SandboxException(ErrorCode.ForbiddenType);
+            case RedirectMode.Honeypot:
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    public static Process? Start(ProcessStartInfo startInfo)
+    {
+        RecordAccess($"PROCESS_START({startInfo.FileName})");
+        switch (Mode)
+        {
+            case RedirectMode.Block:
+                throw new SandboxException(ErrorCode.ForbiddenType);
+            case RedirectMode.Honeypot:
+                return null;
+            default:
+                return null;
         }
     }
 

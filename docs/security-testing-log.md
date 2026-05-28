@@ -59,6 +59,11 @@ When `EnableRuntimeHooks = true` (default), Lead rewrites IL `call` / `callvirt`
 | `File.Exists(path)` | `FileIOProxy.Exists` | Returns virtual file existence | Blocked |
 | `File.ReadLines(path)` | `FileIOProxy.ReadLines` | Returns fake content split by newlines | Blocked |
 | `File.AppendAllText(path, content)` | `FileIOProxy.AppendAllText` | Silently recorded | Blocked |
+| `Assembly.LoadFrom(path)` | `AssemblyLoadFromProxy.LoadFrom` | Loads through sandbox ALC with IL rewriting; can be disabled via `AllowAssemblyLoadFrom = false` | Blocked |
+| `Assembly.Load(assemblyName)` | `AssemblyLoadFromProxy.Load` | Loads through sandbox ALC; blocked assembly prefixes checked | Blocked |
+| `Process.Start(fileName, arguments)` | `ProcessProxy.Start` | Silently recorded, returns null | Blocked |
+| `Process.Start(fileName)` | `ProcessProxy.Start` | Silently recorded, returns null | Blocked |
+| `Process.Start(startInfo)` | `ProcessProxy.Start` | Silently recorded, returns null | Blocked |
 | `HttpClient.GetStringAsync(url)` | `NetworkProxy.GetStringAsync` | Returns fake HTTP response | Blocked |
 | `Process.Start()` | `ProcessProxy.Start` | Silently recorded, no process spawned | Blocked |
 | `Process.Kill()` | `ProcessProxy.Kill` | Silently recorded | Blocked |
@@ -94,7 +99,6 @@ These are attack vectors that Lead **cannot currently defend against** in the ma
 
 | Attack Vector | Severity | Reason | Mitigation |
 |--------------|----------|--------|------------|
-| Reading arbitrary files via `Assembly.LoadFrom` + reflection — if an attacker loads an external DLL at runtime via reflection, Lead cannot intercept it because it happens inside the sandboxed process and the dynamically loaded assembly's IL is not rewritten | High | IL rewriting operates on assemblies loaded through `PluginLoader`; `Assembly.LoadFrom` called from within the sandbox bypasses the rewrite step | Use `StrictValidation = true` to reject assemblies that use reflection at load time; combine with OS-level sandbox (containers, seccomp) |
 | Raw socket creation via `Socket` constructor with address family `AddressFamily.InterNetwork` / `InterNetworkV6` | High | ALC blocks `System.Net.Sockets`, but raw IP sockets are a kernel-level construct; a determined attacker could potentially bypass managed sockets and interact with the network stack directly | OS-level network filtering (firewall rules, seccomp) |
 | `Environment.GetEnvironmentVariable` reading sensitive env vars | Low | `Environment` type is in `System.Runtime` and not currently hooked; the variable names themselves may be sensitive | Inject a sanitized `IEnvironmentService` instead of exposing the real `Environment` class |
 | Thread pool saturation via async file I/O (not `Task.Run`) | Low | `File.ReadAllBytesAsync` / `File.WriteAllBytesAsync` use the thread pool internally; Lead cannot limit thread pool threads consumed by async I/O operations | OS-level process resource limits |
@@ -145,3 +149,4 @@ All attack vectors are tested via `MaliciousPlugin.dll` — a dedicated test lib
 | 1.0.0 | Initial release — static analysis + ALC isolation + Honeypot VFS |
 | 1.0.1 | Repository URL correction, description update |
 | 1.0.2 | Runtime IL rewriting hook engine added — `File.Delete`, `File.ReadAllText`, `HttpClient.GetStringAsync`, `Process.Start`, `MethodInfo.Invoke` now have dedicated runtime hooks via IL rewriting |
+| 1.0.3 | `Assembly.LoadFrom` / `Assembly.Load` interception — new assemblies loaded via these APIs are redirected through the sandbox ALC with IL rewriting applied; `AllowAssemblyLoadFrom` configuration switch added; `ResolveProxyMethod` now matches by parameter count to support method overloads; `ProcessProxy.Start` and `NetworkProxy.GetStringAsync` overload support added |

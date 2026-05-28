@@ -647,6 +647,64 @@ public class ApiAbuseHttpBypass : ISandboxedPlugin
     public void Shutdown() { }
 }
 
+public class AssemblyLoadFromBypass : ISandboxedPlugin
+{
+    private IPluginContext _ctx = null!;
+    public string Id => "bypass-assembly-loadfrom";
+    public string Name => "Assembly.LoadFrom Bypass";
+    public string Version => "1.0.0";
+    public void Initialize(IPluginContext ctx) => _ctx = ctx;
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        try
+        {
+            var asm = Assembly.LoadFrom(typeof(object).Assembly.Location);
+            Console.WriteLine($"    [LoadFrom] Loaded assembly: {asm.FullName}");
+        }
+        catch (SandboxException ex)
+        {
+            Console.WriteLine($"    [LoadFrom] Blocked by sandbox: {ex.Code}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    [LoadFrom] Error: {ex.Message}");
+        }
+
+        await Task.CompletedTask;
+    }
+    public void Shutdown() { }
+}
+
+public class AssemblyLoadStringBypass : ISandboxedPlugin
+{
+    private IPluginContext _ctx = null!;
+    public string Id => "bypass-assembly-load-string";
+    public string Name => "Assembly.Load Bypass";
+    public string Version => "1.0.0";
+    public void Initialize(IPluginContext ctx) => _ctx = ctx;
+
+    public async Task ExecuteAsync(CancellationToken ct)
+    {
+        try
+        {
+            var asm = Assembly.Load("System.Runtime");
+            Console.WriteLine($"    [Load] Loaded assembly: {asm.FullName}");
+        }
+        catch (SandboxException ex)
+        {
+            Console.WriteLine($"    [Load] Blocked by sandbox: {ex.Code}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    [Load] Error: {ex.Message}");
+        }
+
+        await Task.CompletedTask;
+    }
+    public void Shutdown() { }
+}
+
 public class ApiAbuseResourceExhaustionBypass : ISandboxedPlugin
 {
     private IPluginContext _ctx = null!;
