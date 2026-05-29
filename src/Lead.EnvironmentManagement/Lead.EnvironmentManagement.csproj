@@ -5,16 +5,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
-    <PackageId>Lead.Sandbox</PackageId>
-    <Version>1.1.4</Version>
+    <PackageId>Lead.EnvironmentManagement</PackageId>
+    <Version>1.0.0</Version>
     <Authors>Lead Contributors</Authors>
-    <Description>A secure, virtualized assembly sandbox for .NET 8+. Load any assembly into an isolated environment with runtime IL rewriting, honeypot virtualization, and resource limits. No Harmony, no native hooks — fully compatible with .NET 10.</Description>
-    <PackageTags>sandbox;plugin;security;virtualization;honeypot;isolation</PackageTags>
+    <Description>Upper-level encapsulation for Lead.Sandbox — one-click preset sandboxes for Windows/Linux, system info spoofing, and runtime variable inspection.</Description>
+    <PackageTags>sandbox;environment;honeypot;virtualization;runtime-inspection</PackageTags>
     <PackageProjectUrl>https://github.com/XSY-HYH/Lead</PackageProjectUrl>
     <RepositoryUrl>https://github.com/XSY-HYH/Lead.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>CS1591</NoWarn>
@@ -23,12 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Castle.Core" Version="5.1.1" />
-    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <ProjectReference Include="..\Lead\Lead.csproj" />
   </ItemGroup>
 
 </Project>

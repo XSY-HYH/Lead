@@ -208,3 +208,97 @@ config.HttpResponder = new MyCustomResponder();
 ## License
 
 MIT
+
+---
+
+## Lead.EnvironmentManagement
+
+A companion package that provides one-click preset sandboxes and runtime inspection capabilities on top of Lead.Sandbox.
+
+### Install
+
+```
+dotnet add package Lead.EnvironmentManagement
+```
+
+### One-Click Preset Sandboxes
+
+No manual configuration needed — choose your platform and mode:
+
+```csharp
+using Lead.EnvironmentManagement;
+
+// Windows Honeypot
+using var sandbox = PresetSandbox.CreateWindowsHoneypot();
+var result = await sandbox.LoadPluginAsync("plugin.dll");
+
+// Linux Honeypot (spoofs /etc/passwd, /proc/cpuinfo, etc.)
+using var sandbox = PresetSandbox.CreateLinuxHoneypot();
+
+// Linux ARM64 (spoofs architecture to Arm64)
+using var sandbox = PresetSandbox.CreateLinuxHoneypot(EnvironmentProfile.LinuxArm64);
+
+// Block mode variants
+using var sandbox = PresetSandbox.CreateWindowsBlock();
+using var sandbox = PresetSandbox.CreateLinuxBlock();
+
+// Redirect mode variants
+using var sandbox = PresetSandbox.CreateWindowsRedirect();
+using var sandbox = PresetSandbox.CreateLinuxRedirect();
+```
+
+### System Info Spoofing
+
+Loaded code sees a completely fake environment:
+
+- `Environment.MachineName` → `DESKTOP-SANDBOX` (Windows) / `sandbox-host` (Linux)
+- `Environment.UserName` → `sandbox_user`
+- `RuntimeInformation.OSArchitecture` → `X64` or `Arm64`
+- `RuntimeInformation.OSDescription` → Fake OS string
+- `Environment.GetFolderPath(...)` → Virtual paths
+- `Environment.GetEnvironmentVariable(...)` → Fake env vars
+
+Custom profiles:
+
+```csharp
+var profile = new EnvironmentProfile
+{
+    MachineName = "my-fake-host",
+    UserName = "fake_user",
+    ProcessorCount = 2,
+    // ... all properties customizable
+};
+using var sandbox = PresetSandbox.CreateLinuxHoneypot(profile);
+```
+
+### Runtime Inspector
+
+Inspect and manipulate loaded assemblies at runtime:
+
+```csharp
+using var sandbox = PresetSandbox.CreateWindowsHoneypot();
+var result = await sandbox.LoadPluginAsync("plugin.dll");
+
+var inspector = sandbox.Inspector;
+
+// List types
+var types = inspector.GetLoadedTypes();
+
+// Read/write static fields
+inspector.SetStaticFieldValue("MyClass", "ConfigPath", "/fake/path");
+var value = inspector.GetStaticFieldValue("MyClass", "ConfigPath");
+
+// Read/write static properties
+inspector.SetStaticPropertyValue("MyClass", "Enabled", true);
+
+// Get all variables at once
+var allValues = inspector.GetAllStaticValues("MyClass");
+
+// Invoke methods
+var output = inspector.InvokeStaticMethod("MyClass", "Process", "input");
+
+// Create instances and inspect instance fields
+var instance = inspector.CreateInstance("MyClass");
+inspector.SetInstanceFieldValue(instance, "_counter", 42);
+var instanceValues = inspector.GetAllInstanceValues(instance);
+```

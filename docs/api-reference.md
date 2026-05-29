@@ -140,6 +140,10 @@ int count = manager.RewriteCount;  // number of call instructions rewritten
 | `NetworkMethodHook` | Network | `HttpClient.GetStringAsync` |
 | `ProcessMethodHook` | Process | `Process.Start`, `Process.Kill` |
 | `ReflectionMethodHook` | Reflection | `MethodInfo.Invoke`, `Activator.CreateInstance` |
+| `EnvironmentMethodHook` * | EnvironmentInfo | `Environment.GetFolderPath`, `GetEnvironmentVariable`, `GetEnvironmentVariables`, `MachineName`, `UserName`, `OSVersion`, `ProcessorCount`, `Is64BitOperatingSystem`, `Is64BitProcess`, `SystemDirectory`, `RuntimeInformation.FrameworkDescription`, `OSDescription`, `ProcessArchitecture`, `OSArchitecture` |
+| `LinuxFileIOMethodHook` * | LinuxFileIO | Same as `FileIOMethodHook` + `Directory.Exists`, `GetFiles`, `GetDirectories`, `CreateDirectory` |
+
+*\* Available in `Lead.EnvironmentManagement` package*
 
 ### Proxy Classes
 
