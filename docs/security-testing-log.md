@@ -102,6 +102,57 @@ When `EnableRuntimeHooks = true` (default), Lead rewrites IL `call` / `callvirt`
 
 ---
 
+### TamperGuard (Anti-Tamper Defense)
+
+TamperGuard protects Lead's own critical methods from runtime modification. When activated, it monitors protected method memory regions and terminates the process immediately upon detecting any tampering attempt — no polling, no delay.
+
+| Attack Vector | Severity | Defense Layer | Status |
+|--------------|----------|---------------|--------|
+| RuntimePatch dynamic method redirection | Critical | VEH + PAGE_EXECUTE_READ protection | Blocked |
+| `Marshal.WriteByte` direct memory write | Critical | VEH catches ACCESS_VIOLATION on protected page | Blocked |
+| `RtlMoveMemory` kernel32 memory copy | Critical | VEH catches ACCESS_VIOLATION on protected page | Blocked |
+| `NtProtectVirtualMemory` bypass API hook to change page protection | Critical | API Hook on NtProtectVirtualMemory blocks region overlap | Blocked |
+| Restore VirtualProtect hook original bytes then write | Critical | Guard Page + Hardware Breakpoints detect page attribute change | Blocked |
+| `unsafe` pointer direct write | Critical | VEH catches ACCESS_VIOLATION on protected page | Blocked |
+| `VirtualProtectEx` cross-process page modification | Critical | API Hook on VirtualProtectEx blocks region overlap | Blocked |
+| `WriteProcessMemory` remote memory write | Critical | API Hook on WriteProcessMemory blocks region overlap | Blocked |
+| Reflection tamper of TamperGuard static fields | High | Critical state stored in unmanaged memory (`s_statePtr`), reflection cannot modify | Blocked |
+| `RemoveVectoredExceptionHandler` remove VEH handler | High | Guard Page + Hardware Breakpoints provide redundant defense after VEH removal | Blocked |
+| Direct syscall `NtProtectVirtualMemory` to change page protection then write | Critical | Hardware Breakpoints (DR0-DR3) detect write at CPU level; Guard Page triggers GUARD_PAGE_VIOLATION | Blocked |
+| Clear `s_hwBreakpointsActive` flag then syscall write | High | Guard Page still protects; flag stored in unmanaged memory | Blocked |
+| Multi-threaded race: parallel syscall + write | Critical | Hardware Breakpoints apply per-thread via DR registers; Guard Page is process-wide | Blocked |
+| `SetThreadContext` clear DR0-DR3 registers then syscall write | Critical | Guard Page + PAGE_EXECUTE_READ protection remain after DR clearing | Blocked |
+| Direct syscall `NtWriteVirtualMemory` to write protected memory | Critical | Guard Page triggers on write access; Hardware Breakpoints detect write | Blocked |
+| Remove VEH then syscall change page protection (double attack) | Critical | Guard Page + Hardware Breakpoints provide defense-in-depth after VEH removal | Blocked |
+| Overwrite NtProtectVirtualMemory trampoline then call original | High | Guard Page protects trampoline memory; Hardware Breakpoints detect write to trampoline | Blocked |
+
+#### TamperGuard Defense Layers
+
+| Layer | Mechanism | What It Catches |
+|-------|-----------|-----------------|
+| Page Protection | Set method memory pages to `PAGE_EXECUTE_READ` | Any direct write to protected memory (ACCESS_VIOLATION) |
+| VEH Handler | Vectored Exception Handler catches access violations | Write attempts to read-only pages |
+| API Hooks | Hook VirtualProtect/VirtualProtectEx/WriteProcessMemory/NtProtectVirtualMemory | Attempts to change page protection or write to protected regions via Win32 API |
+| Hardware Breakpoints | DR0-DR3 write breakpoints on protected page starts | Syscall-level write attempts (CPU hardware detection) |
+| Guard Page | `PAGE_GUARD` flag on protected pages | Any access to guarded pages triggers exception |
+| Integrity Check | djb2 hash of method entry bytes, verified on SINGLE_STEP | Any undetected modification of method entry code |
+| Unmanaged State | Critical data stored in unmanaged memory via `Marshal.AllocHGlobal` | Reflection-based tampering of TamperGuard internal state |
+| FLS Recursion Guard | Fiber Local Storage flag prevents hook recursion | Hook installation triggering itself |
+
+#### TamperGuard Configuration
+
+```csharp
+var config = new SandboxConfiguration
+{
+    EnableTamperProtection = true,       // Enable TamperGuard (default: true)
+    EnableHardwareBreakpoints = true,    // DR register write breakpoints (default: true)
+    EnableIntegrityCheck = true,         // Method entry hash verification (default: true)
+    EnableGuardPage = true               // PAGE_GUARD protection (default: true)
+};
+```
+
+---
+
 ## Known Limitations (Currently Leaked)
 
 These are attack vectors that Lead **cannot currently defend against** in the managed code sandbox. Some have OS-level mitigations available (seccomp, AppArmor, containers) that are outside Lead's scope.
@@ -112,6 +163,7 @@ These are attack vectors that Lead **cannot currently defend against** in the ma
 |--------------|----------|--------|------------|
 | Raw socket creation via `Socket` constructor with address family `AddressFamily.InterNetwork` / `InterNetworkV6` | High | ALC blocks `System.Net.Sockets`, but raw IP sockets are a kernel-level construct; a determined attacker could potentially bypass managed sockets and interact with the network stack directly | OS-level network filtering (firewall rules, seccomp) |
 | Thread pool saturation via async file I/O (not `Task.Run`) | Low | `File.ReadAllBytesAsync` / `File.WriteAllBytesAsync` use the thread pool internally; Lead cannot limit thread pool threads consumed by async I/O operations | OS-level process resource limits |
+| Kernel-level attacks (rootkits, drivers) | Critical | TamperGuard operates in user space; kernel-level code can modify process memory without triggering any user-space defense | OS-level kernel security, secure boot |
 
 ### Not Yet Hooked (Potential Gaps)
 
@@ -163,3 +215,4 @@ All attack vectors are tested via `MaliciousPlugin.dll` — a dedicated test lib
 | 1.0.4 | Honeypot mode verification fix — test code now uses `FileInfo`/`FileStream` (not hooked by IL rewriting) to verify real filesystem state; confirmed `File.WriteAllText` / `File.ReadAllText` / `File.Delete` are correctly virtualized in Honeypot mode; `AssemblyLoadFromMethodHook` added to default hooks; `ImportType` fallback for system types; `LoadWithRewrite` no longer silently falls back on rewrite failure |
 | 1.1.4 | `Environment` / `RuntimeInformation` system info spoofing via `EnvironmentMethodHook` + `EnvironmentProxy`; Linux preset sandbox with `LinuxFileIOMethodHook` + `LinuxFileIOProxy` (virtual `/etc/*`, `/proc/*`, `/var/log/*`); `RuntimeInspector` for runtime variable read/write/invocation; `PresetSandbox` one-click factory methods for Windows/Linux Honeypot/Block/Redirect; `InternalsVisibleTo` for `Lead.EnvironmentManagement` |
 | 1.1.5 | `calli` / `ldftn` / `ldvirtftn` IL instruction detection as `UNMANAGED_CALL`; `NativeInteropMethodHook` + `NativeInteropProxy` for `NativeLibrary.Load/GetExport/Free/TryLoad/TryGetExport` and `Marshal.GetDelegateForFunctionPointer/GetFunctionPointerForDelegate`; `Marshal` memory manipulation methods added to `ForbiddenMethods` |
+| 1.2.0 | `TamperGuard` anti-tamper defense — VEH exception handler + API hooks (VirtualProtect/VirtualProtectEx/WriteProcessMemory/NtProtectVirtualMemory) + hardware breakpoints (DR0-DR3) + Guard Page (PAGE_GUARD) + method entry integrity check (djb2 hash); unmanaged state storage; FLS recursion guard; 17 attack scenarios tested with 100% defense rate including direct syscall, DR register clearing, multi-threaded race, and trampoline overwrite attacks; `SandboxConfiguration` new properties: `EnableHardwareBreakpoints`, `EnableIntegrityCheck`, `EnableGuardPage` |

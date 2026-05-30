@@ -24,6 +24,7 @@ Lead solves this by providing a pure managed-code sandbox that works on .NET 8+ 
 - **Resource Limits** — file size, I/O throughput, HTTP request count, execution timeout
 - **Custom Redirectors** — implement `IFileRedirector` / `IHttpResponder` to define your own virtualization logic
 - **Custom Hooks** — implement `IMethodHook` to define your own IL rewriting rules
+- **Anti-Tamper** — TamperGuard protects Lead's own methods from runtime modification; 8-layer defense (page protection, VEH, API hooks, hardware breakpoints, Guard Page, integrity check, unmanaged state, FLS recursion guard) with 100% defense rate against 17 attack scenarios including direct syscall
 
 ## Quick Start
 
@@ -140,6 +141,57 @@ var config = new SandboxConfiguration
     EnableRuntimeHooks = false  // disable IL rewriting
 };
 ```
+
+## Anti-Tamper (TamperGuard)
+
+TamperGuard protects Lead's own critical methods from runtime modification. When activated, it monitors protected method memory regions and terminates the process immediately upon detecting any tampering — no polling, no delay.
+
+### Defense Layers
+
+| Layer | Mechanism | What It Catches |
+|-------|-----------|-----------------|
+| Page Protection | `PAGE_EXECUTE_READ` on method memory | Direct writes trigger ACCESS_VIOLATION |
+| VEH Handler | Vectored Exception Handler | Catches access violations on protected pages |
+| API Hooks | Hook VirtualProtect/VirtualProtectEx/WriteProcessMemory/NtProtectVirtualMemory | Blocks page protection changes and writes via Win32 API |
+| Hardware Breakpoints | DR0-DR3 write breakpoints | Catches syscall-level writes (CPU hardware detection) |
+| Guard Page | `PAGE_GUARD` flag | Any access triggers exception, auto-reapplied |
+| Integrity Check | djb2 hash of method entry bytes | Detects any undetected code modification |
+| Unmanaged State | Critical data in `Marshal.AllocHGlobal` | Prevents reflection tampering |
+| FLS Recursion Guard | Fiber Local Storage flag | Prevents hook recursion |
+
+### Configuration
+
+```csharp
+var config = new SandboxConfiguration
+{
+    EnableTamperProtection = true,       // Enable TamperGuard (default: true)
+    EnableHardwareBreakpoints = true,    // DR register write breakpoints (default: true)
+    EnableIntegrityCheck = true,         // Method entry hash verification (default: true)
+    EnableGuardPage = true               // PAGE_GUARD protection (default: true)
+};
+```
+
+### Tested Attack Scenarios (17/17 Blocked)
+
+| # | Attack | Defense |
+|---|--------|---------|
+| 1 | RuntimePatch method redirection | VEH + page protection |
+| 2 | Marshal.WriteByte direct write | VEH ACCESS_VIOLATION |
+| 3 | RtlMoveMemory kernel copy | VEH ACCESS_VIOLATION |
+| 4 | NtProtectVirtualMemory bypass hook | API Hook blocks region overlap |
+| 5 | Restore VirtualProtect hook bytes | Guard Page + Hardware Breakpoints |
+| 6 | unsafe pointer direct write | VEH ACCESS_VIOLATION |
+| 7 | VirtualProtectEx cross-process | API Hook blocks region overlap |
+| 8 | WriteProcessMemory remote write | API Hook blocks region overlap |
+| 9 | Reflection tamper static fields | Unmanaged state storage |
+| 10 | RemoveVectoredExceptionHandler | Guard Page + Hardware Breakpoints |
+| 11 | Direct syscall NtProtectVirtualMemory | Hardware Breakpoints + Guard Page |
+| 12 | Clear hw breakpoint flag + syscall | Guard Page protection |
+| 13 | Multi-threaded race syscall | Per-thread DR + process-wide Guard Page |
+| 14 | SetThreadContext clear DR registers | Guard Page + page protection |
+| 15 | Direct syscall NtWriteVirtualMemory | Guard Page + Hardware Breakpoints |
+| 16 | Remove VEH + syscall (double attack) | Guard Page + Hardware Breakpoints |
+| 17 | Overwrite trampoline + call original | Guard Page protects trampoline |
 
 ### Control Assembly.LoadFrom
 

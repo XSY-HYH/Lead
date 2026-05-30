@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Lead.Sandbox</PackageId>
-    <Version>1.2.1</Version>
+    <Version>1.3.0</Version>
     <Authors>Lead Contributors</Authors>
     <Description>A secure, virtualized assembly sandbox for .NET 8+. IL rewriting, honeypot virtualization, tamper protection, and resource limits. Fully compatible with .NET 10.</Description>
     <PackageTags>sandbox;plugin;security;virtualization;honeypot;isolation</PackageTags>

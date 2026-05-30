@@ -36,6 +36,12 @@ public class SandboxConfiguration
 
     public bool EnableTamperProtection { get; set; } = true;
 
+    public bool EnableHardwareBreakpoints { get; set; } = true;
+
+    public bool EnableIntegrityCheck { get; set; } = true;
+
+    public bool EnableGuardPage { get; set; } = true;
+
     public MethodHookDispatcher HookDispatcher { get; } = new();
 
     public Dictionary<string, Dictionary<string, object>> PluginConfigs { get; set; } = new();

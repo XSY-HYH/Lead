@@ -207,6 +207,13 @@ public class PluginLoader : IDisposable
     {
         _tamperGuard = new TamperGuard();
 
+        if (_config.EnableHardwareBreakpoints)
+            _tamperGuard.EnableHardwareBreakpoints();
+        if (_config.EnableIntegrityCheck)
+            _tamperGuard.EnableIntegrityCheck();
+        if (_config.EnableGuardPage)
+            _tamperGuard.EnableGuardPage();
+
         var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
         _tamperGuard.Protect(typeof(SandboxedAssemblyLoadContext).GetMethod("Load", flags, null, new[] { typeof(AssemblyName) }, null)!);
