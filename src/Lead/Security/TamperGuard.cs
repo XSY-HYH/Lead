@@ -7,6 +7,7 @@ namespace Lead.Security;
 public sealed class TamperGuard : IDisposable
 {
     private const uint PAGE_EXECUTE_READ = 0x20;
+    private const uint PAGE_EXECUTE_READWRITE = 0x40;
     private const int STATUS_ACCESS_VIOLATION = unchecked((int)0xC0000005);
     private const long EXCEPTION_CONTINUE_SEARCH = 0;
 
@@ -19,6 +20,18 @@ public sealed class TamperGuard : IDisposable
     [DllImport("kernel32.dll")]
     private static extern int RemoveVectoredExceptionHandler(IntPtr handle);
 
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtProtectVirtualMemory(IntPtr processHandle, ref IntPtr baseAddress, ref UIntPtr regionSize, uint newProtect, out uint oldProtect);
+
     [DllImport("libc")]
     private static extern int mprotect(IntPtr addr, UIntPtr len, int prot);
 
@@ -28,11 +41,19 @@ public sealed class TamperGuard : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate long VectoredHandlerDelegate(IntPtr exceptionPointers);
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate bool VirtualProtectDelegate(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
+
     private static IntPtr s_regionsBuffer;
     private static int s_regionCount;
-    private static VectoredHandlerDelegate? s_handler;
+    private static VectoredHandlerDelegate? s_vehHandler;
     private static IntPtr s_vehHandle;
     private static bool s_active;
+
+    private static IntPtr s_vpOriginalAddr;
+    private static byte[]? s_vpOriginalBytes;
+    private static VirtualProtectDelegate? s_vpHook;
+    private static bool s_vpHooked;
 
     private readonly List<(IntPtr Start, IntPtr End, string Name)> _pendingRegions = new();
     private bool _disposed;
@@ -74,8 +95,10 @@ public sealed class TamperGuard : IDisposable
             foreach (var (start, end, _) in _pendingRegions)
                 VirtualProtect(start, (UIntPtr)(end.ToInt64() - start.ToInt64()), PAGE_EXECUTE_READ, out _);
 
-            s_handler = StaticOnVectoredException;
-            s_vehHandle = AddVectoredExceptionHandler(1, Marshal.GetFunctionPointerForDelegate(s_handler));
+            s_vehHandler = StaticOnVectoredException;
+            s_vehHandle = AddVectoredExceptionHandler(1, Marshal.GetFunctionPointerForDelegate(s_vehHandler));
+
+            HookVirtualProtect();
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ||
                  RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ||
@@ -86,6 +109,74 @@ public sealed class TamperGuard : IDisposable
         }
 
         s_active = true;
+    }
+
+    private static void HookVirtualProtect()
+    {
+        var kernel32 = GetModuleHandle("kernel32.dll");
+        if (kernel32 == IntPtr.Zero) return;
+
+        s_vpOriginalAddr = GetProcAddress(kernel32, "VirtualProtect");
+        if (s_vpOriginalAddr == IntPtr.Zero) return;
+
+        s_vpOriginalBytes = new byte[14];
+        Marshal.Copy(s_vpOriginalAddr, s_vpOriginalBytes, 0, 14);
+
+        s_vpHook = VirtualProtectHook;
+        var hookPtr = Marshal.GetFunctionPointerForDelegate(s_vpHook);
+
+        NtSetProtection(s_vpOriginalAddr, 14, PAGE_EXECUTE_READWRITE);
+        var hookJump = BuildX64Jump(hookPtr.ToInt64());
+        Marshal.Copy(hookJump, 0, s_vpOriginalAddr, 14);
+        NtSetProtection(s_vpOriginalAddr, 14, PAGE_EXECUTE_READ);
+
+        s_vpHooked = true;
+    }
+
+    private static bool VirtualProtectHook(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect)
+    {
+        if (s_regionsBuffer != IntPtr.Zero && s_regionCount > 0 && lpAddress != IntPtr.Zero)
+        {
+            var addr = lpAddress.ToInt64();
+            var size = (long)dwSize.ToUInt64();
+            var rangeEnd = addr + size;
+
+            for (int i = 0; i < s_regionCount; i++)
+            {
+                var regionStart = Marshal.ReadIntPtr(s_regionsBuffer, i * 16).ToInt64();
+                var regionEnd = Marshal.ReadIntPtr(s_regionsBuffer, i * 16 + 8).ToInt64();
+
+                if (addr < regionEnd && rangeEnd > regionStart)
+                {
+                    TerminateProcess((IntPtr)(-1), 0xDEAD);
+                }
+            }
+        }
+
+        var baseAddr = lpAddress;
+        var regionSize = dwSize;
+        var status = NtProtectVirtualMemory((IntPtr)(-1), ref baseAddr, ref regionSize, flNewProtect, out lpflOldProtect);
+        return status == 0;
+    }
+
+    private static void NtSetProtection(IntPtr addr, int size, uint prot)
+    {
+        var baseAddr = addr;
+        var regionSize = (UIntPtr)size;
+        NtProtectVirtualMemory((IntPtr)(-1), ref baseAddr, ref regionSize, prot, out _);
+    }
+
+    private static byte[] BuildX64Jump(long targetAddr)
+    {
+        var bytes = new byte[14];
+        bytes[0] = 0xFF;
+        bytes[1] = 0x25;
+        bytes[2] = 0x00;
+        bytes[3] = 0x00;
+        bytes[4] = 0x00;
+        bytes[5] = 0x00;
+        BitConverter.TryWriteBytes(bytes.AsSpan(6, 8), targetAddr);
+        return bytes;
     }
 
     private static long StaticOnVectoredException(IntPtr exceptionPointers)
@@ -157,13 +248,23 @@ public sealed class TamperGuard : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        if (s_vpHooked && s_vpOriginalAddr != IntPtr.Zero && s_vpOriginalBytes != null)
+        {
+            NtSetProtection(s_vpOriginalAddr, 14, PAGE_EXECUTE_READWRITE);
+            Marshal.Copy(s_vpOriginalBytes, 0, s_vpOriginalAddr, 14);
+            NtSetProtection(s_vpOriginalAddr, 14, PAGE_EXECUTE_READ);
+            s_vpHooked = false;
+        }
+
+        s_vpHook = null;
+
         if (s_vehHandle != IntPtr.Zero)
         {
             RemoveVectoredExceptionHandler(s_vehHandle);
             s_vehHandle = IntPtr.Zero;
         }
 
-        s_handler = null;
+        s_vehHandler = null;
 
         if (s_regionsBuffer != IntPtr.Zero)
         {
