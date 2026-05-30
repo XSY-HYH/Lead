@@ -34,6 +34,8 @@ public class SandboxConfiguration
 
     public bool AllowAssemblyLoadFrom { get; set; } = true;
 
+    public bool EnableTamperProtection { get; set; } = true;
+
     public MethodHookDispatcher HookDispatcher { get; } = new();
 
     public Dictionary<string, Dictionary<string, object>> PluginConfigs { get; set; } = new();

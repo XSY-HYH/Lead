@@ -1,6 +1,7 @@
 using System.Reflection;
 using Lead.Hooks;
 using Lead.Hooks.Proxies;
+using Lead.Security;
 
 namespace Lead;
 
@@ -12,6 +13,7 @@ public class PluginLoader : IDisposable
     private readonly Dictionary<string, SandboxedAssemblyLoadContext> _loadedContexts = new();
     private readonly Dictionary<string, ISandboxedPlugin> _pluginInstances = new();
     private readonly Dictionary<string, Assembly> _loadedAssemblies = new();
+    private TamperGuard? _tamperGuard;
 
     public PluginLoader(SandboxConfiguration config)
     {
@@ -23,6 +25,9 @@ public class PluginLoader : IDisposable
             _hookManager = new RuntimeHookManager(config.HookDispatcher);
             ConfigureProxies();
         }
+
+        if (config.EnableTamperProtection)
+            ActivateTamperGuard();
     }
 
     public async Task<LoadResult> LoadPluginAsync(string dllPath, CancellationToken ct = default)
@@ -160,6 +165,7 @@ public class PluginLoader : IDisposable
 
     public void Dispose()
     {
+        _tamperGuard?.Dispose();
         foreach (var pluginId in _loadedContexts.Keys.ToList())
             UnloadPlugin(pluginId);
     }
@@ -195,5 +201,26 @@ public class PluginLoader : IDisposable
 
         ProcessProxy.Mode = _config.FileRedirectMode;
         ReflectionProxy.Mode = _config.FileRedirectMode;
+    }
+
+    private void ActivateTamperGuard()
+    {
+        _tamperGuard = new TamperGuard();
+
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+        _tamperGuard.Protect(typeof(SandboxedAssemblyLoadContext).GetMethod("Load", flags, null, new[] { typeof(AssemblyName) }, null)!);
+        _tamperGuard.Protect(typeof(SandboxedAssemblyLoadContext).GetMethod("LoadWithRewrite", flags, null, new[] { typeof(string) }, null)!);
+        _tamperGuard.Protect(typeof(AssemblyValidator).GetMethod("Validate", new[] { typeof(string) })!);
+        _tamperGuard.Protect(typeof(ReflectionProxy).GetMethod("Invoke", flags, null, new[] { typeof(object), typeof(object), typeof(object[]) }, null)!);
+        _tamperGuard.Protect(typeof(AssemblyLoadFromProxy).GetMethod("LoadFrom", new[] { typeof(string) })!);
+        _tamperGuard.Protect(typeof(AssemblyLoadFromProxy).GetMethod("LoadFrom", new[] { typeof(byte[]) })!);
+        _tamperGuard.Protect(typeof(AssemblyLoadFromProxy).GetMethod("Load", new[] { typeof(string) })!);
+        _tamperGuard.Protect(typeof(FileIOProxy).GetMethod("Read", flags, null, new[] { typeof(string) }, null)!);
+        _tamperGuard.Protect(typeof(FileIOProxy).GetMethod("Write", flags, null, new[] { typeof(string), typeof(byte[]) }, null)!);
+        _tamperGuard.Protect(typeof(NetworkProxy).GetMethod("SendRequest", flags, null, new[] { typeof(string) }, null)!);
+        _tamperGuard.Protect(typeof(ProcessProxy).GetMethod("Start", flags, null, new[] { typeof(string) }, null)!);
+
+        _tamperGuard.Activate();
     }
 }

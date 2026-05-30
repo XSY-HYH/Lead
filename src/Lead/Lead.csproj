@@ -6,9 +6,9 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Lead.Sandbox</PackageId>
-    <Version>1.1.5</Version>
+    <Version>1.2.0</Version>
     <Authors>Lead Contributors</Authors>
-    <Description>A secure, virtualized assembly sandbox for .NET 8+. Load any assembly into an isolated environment with runtime IL rewriting, honeypot virtualization, and resource limits. No Harmony, no native hooks — fully compatible with .NET 10.</Description>
+    <Description>A secure, virtualized assembly sandbox for .NET 8+. IL rewriting, honeypot virtualization, tamper protection, and resource limits. Fully compatible with .NET 10.</Description>
     <PackageTags>sandbox;plugin;security;virtualization;honeypot;isolation</PackageTags>
     <PackageProjectUrl>https://github.com/XSY-HYH/Lead</PackageProjectUrl>
     <RepositoryUrl>https://github.com/XSY-HYH/Lead.git</RepositoryUrl>
