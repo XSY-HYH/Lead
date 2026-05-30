@@ -8,6 +8,7 @@ public static class ErrorCode
     public const string ForbiddenAttribute = "FORBIDDEN_ATTRIBUTE";
     public const string UnsafeCode = "UNSAFE_CODE";
     public const string PInvoke = "PINVOKE";
+    public const string UnmanagedCall = "UNMANAGED_CALL";
     public const string PointerType = "POINTER_TYPE";
     public const string ForbiddenAssembly = "FORBIDDEN_ASSEMBLY";
     public const string PluginTypeNotFound = "PLUGIN_TYPE_NOT_FOUND";

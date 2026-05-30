@@ -138,8 +138,19 @@ public class AssemblyValidator
     {
         foreach (var instruction in method.Body.Instructions)
         {
+            if (instruction.OpCode == OpCodes.Calli)
+            {
+                errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.UnmanagedCall, Severity.Error));
+                continue;
+            }
+
+            if (instruction.OpCode == OpCodes.Ldftn || instruction.OpCode == OpCodes.Ldvirtftn)
+            {
+                errors.Add(new ValidationError($"{typeName}.{method.Name}", ErrorCode.UnmanagedCall, Severity.Error));
+                continue;
+            }
+
             if (instruction.OpCode == OpCodes.Call ||
-                instruction.OpCode == OpCodes.Calli ||
                 instruction.OpCode == OpCodes.Callvirt)
             {
                 if (instruction.Operand is not MethodReference target) continue;

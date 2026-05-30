@@ -95,7 +95,8 @@ public class SandboxConfiguration
             new NetworkMethodHook(),
             new ProcessMethodHook(),
             new ReflectionMethodHook(),
-            new AssemblyLoadFromMethodHook()
+            new AssemblyLoadFromMethodHook(),
+            new NativeInteropMethodHook()
         });
     }
 }

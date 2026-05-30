@@ -140,6 +140,7 @@ int count = manager.RewriteCount;  // number of call instructions rewritten
 | `NetworkMethodHook` | Network | `HttpClient.GetStringAsync` |
 | `ProcessMethodHook` | Process | `Process.Start`, `Process.Kill` |
 | `ReflectionMethodHook` | Reflection | `MethodInfo.Invoke`, `Activator.CreateInstance` |
+| `NativeInteropMethodHook` | NativeInterop | `NativeLibrary.Load`, `NativeLibrary.GetExport`, `NativeLibrary.Free`, `NativeLibrary.TryLoad`, `NativeLibrary.TryGetExport`, `Marshal.GetDelegateForFunctionPointer`, `Marshal.GetFunctionPointerForDelegate` |
 | `EnvironmentMethodHook` * | EnvironmentInfo | `Environment.GetFolderPath`, `GetEnvironmentVariable`, `GetEnvironmentVariables`, `MachineName`, `UserName`, `OSVersion`, `ProcessorCount`, `Is64BitOperatingSystem`, `Is64BitProcess`, `SystemDirectory`, `RuntimeInformation.FrameworkDescription`, `OSDescription`, `ProcessArchitecture`, `OSArchitecture` |
 | `LinuxFileIOMethodHook` * | LinuxFileIO | Same as `FileIOMethodHook` + `Directory.Exists`, `GetFiles`, `GetDirectories`, `CreateDirectory` |
 
@@ -154,6 +155,7 @@ int count = manager.RewriteCount;  // number of call instructions rewritten
 | `NetworkProxy` | Block: throws; Honeypot: returns fake HTTP response |
 | `ProcessProxy` | Block: throws; Honeypot: silently records (no process spawned) |
 | `ReflectionProxy` | Block: throws; Honeypot: returns null |
+| `NativeInteropProxy` | Block: throws; Honeypot: returns `IntPtr.Zero` / `null` / `false`, silently logs |
 
 Each proxy exposes a `GetAccessLog()` / `GetRequestLog()` method for auditing.
 
@@ -425,6 +427,7 @@ public enum RedirectMode
 | `FORBIDDEN_ASSEMBLY` | Assembly blocked by ALC |
 | `UNSAFE_CODE` | Unsafe code detected |
 | `PINVOKE` | P/Invoke call detected |
+| `UNMANAGED_CALL` | Unmanaged indirect call via `calli` / `ldftn` / `ldvirtftn` |
 | `PATH_TRAVERSAL` | Path traversal attempt |
 | `PATH_ESCAPE` | Path escaped sandbox boundary |
 | `FORBIDDEN_FILE_EXT` | File extension not allowed |

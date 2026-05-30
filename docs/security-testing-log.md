@@ -33,6 +33,10 @@ The following attack vectors have been tested and are currently blocked by Lead'
 | `RegistryKey.OpenSubKey` registry read | Medium | `AssemblyValidator` — registry methods in `ForbiddenMethods` | Blocked |
 | `Process.Start` / `Process.Kill` | Critical | ALC blocks `System.Diagnostics.Process` assembly + IL rewriting via `ProcessProxy` | Blocked |
 | `AppDomain` manipulation | Critical | `AssemblyValidator` — `AppDomain` methods in `ForbiddenMethods` | Blocked |
+| `calli` indirect unmanaged call via function pointer | Critical | `AssemblyValidator` — `OpCodes.Calli` detected as `UNMANAGED_CALL` error | Blocked |
+| `ldftn` / `ldvirtftn` function pointer extraction | Critical | `AssemblyValidator` — `OpCodes.Ldftn` / `OpCodes.Ldvirtftn` detected as `UNMANAGED_CALL` error | Blocked |
+| `NativeLibrary.Load` / `GetExport` dynamic native function resolution | Critical | `AssemblyValidator` — `NativeLibrary` in `ForbiddenTypes` + `ForbiddenMethods` + `NativeInteropProxy` at runtime | Blocked |
+| `Marshal.GetDelegateForFunctionPointer` delegate-from-pointer creation | Critical | `AssemblyValidator` — `Marshal` in `ForbiddenTypes` + `ForbiddenMethods` + `NativeInteropProxy` at runtime | Blocked |
 
 ### Runtime Isolation (ALC)
 
@@ -69,6 +73,13 @@ When `EnableRuntimeHooks = true` (default), Lead rewrites IL `call` / `callvirt`
 | `Process.Kill()` | `ProcessProxy.Kill` | Silently recorded | Blocked |
 | `MethodInfo.Invoke(mi, obj, args)` | `ReflectionProxy.Invoke` | Returns `null` | Blocked |
 | `Activator.CreateInstance(type, args)` | `ReflectionProxy.CreateInstance` | Returns `null` or default | Blocked |
+| `NativeLibrary.Load(libraryPath)` | `NativeInteropProxy.Load` | Returns `IntPtr.Zero`, no native library loaded | Blocked |
+| `NativeLibrary.GetExport(handle, name)` | `NativeInteropProxy.GetExport` | Returns `IntPtr.Zero`, no function pointer obtained | Blocked |
+| `NativeLibrary.Free(handle)` | `NativeInteropProxy.Free` | Silently recorded | Blocked |
+| `NativeLibrary.TryLoad(...)` | `NativeInteropProxy.TryLoad` | Returns `false`, handle set to `IntPtr.Zero` | Blocked |
+| `NativeLibrary.TryGetExport(...)` | `NativeInteropProxy.TryGetExport` | Returns `false`, procAddress set to `IntPtr.Zero` | Blocked |
+| `Marshal.GetDelegateForFunctionPointer(ptr, type)` | `NativeInteropProxy.GetDelegateForFunctionPointer` | Returns `null`, no delegate created | Blocked |
+| `Marshal.GetFunctionPointerForDelegate(d)` | `NativeInteropProxy.GetFunctionPointerForDelegate` | Returns `IntPtr.Zero` | Blocked |
 
 ### Virtualization + Service Layer
 
@@ -100,7 +111,6 @@ These are attack vectors that Lead **cannot currently defend against** in the ma
 | Attack Vector | Severity | Reason | Mitigation |
 |--------------|----------|--------|------------|
 | Raw socket creation via `Socket` constructor with address family `AddressFamily.InterNetwork` / `InterNetworkV6` | High | ALC blocks `System.Net.Sockets`, but raw IP sockets are a kernel-level construct; a determined attacker could potentially bypass managed sockets and interact with the network stack directly | OS-level network filtering (firewall rules, seccomp) |
-| `Environment.GetEnvironmentVariable` reading sensitive env vars | Low | Now hooked by `EnvironmentProxy` via `Lead.EnvironmentManagement` package; returns fake env vars based on `EnvironmentProfile` | Use `Lead.EnvironmentManagement` for system info spoofing |
 | Thread pool saturation via async file I/O (not `Task.Run`) | Low | `File.ReadAllBytesAsync` / `File.WriteAllBytesAsync` use the thread pool internally; Lead cannot limit thread pool threads consumed by async I/O operations | OS-level process resource limits |
 
 ### Not Yet Hooked (Potential Gaps)
@@ -152,3 +162,4 @@ All attack vectors are tested via `MaliciousPlugin.dll` — a dedicated test lib
 | 1.0.3 | `Assembly.LoadFrom` / `Assembly.Load` interception — new assemblies loaded via these APIs are redirected through the sandbox ALC with IL rewriting applied; `AllowAssemblyLoadFrom` configuration switch added; `ResolveProxyMethod` now matches by parameter count to support method overloads; `ProcessProxy.Start` and `NetworkProxy.GetStringAsync` overload support added |
 | 1.0.4 | Honeypot mode verification fix — test code now uses `FileInfo`/`FileStream` (not hooked by IL rewriting) to verify real filesystem state; confirmed `File.WriteAllText` / `File.ReadAllText` / `File.Delete` are correctly virtualized in Honeypot mode; `AssemblyLoadFromMethodHook` added to default hooks; `ImportType` fallback for system types; `LoadWithRewrite` no longer silently falls back on rewrite failure |
 | 1.1.4 | `Environment` / `RuntimeInformation` system info spoofing via `EnvironmentMethodHook` + `EnvironmentProxy`; Linux preset sandbox with `LinuxFileIOMethodHook` + `LinuxFileIOProxy` (virtual `/etc/*`, `/proc/*`, `/var/log/*`); `RuntimeInspector` for runtime variable read/write/invocation; `PresetSandbox` one-click factory methods for Windows/Linux Honeypot/Block/Redirect; `InternalsVisibleTo` for `Lead.EnvironmentManagement` |
+| 1.1.5 | `calli` / `ldftn` / `ldvirtftn` IL instruction detection as `UNMANAGED_CALL`; `NativeInteropMethodHook` + `NativeInteropProxy` for `NativeLibrary.Load/GetExport/Free/TryLoad/TryGetExport` and `Marshal.GetDelegateForFunctionPointer/GetFunctionPointerForDelegate`; `Marshal` memory manipulation methods added to `ForbiddenMethods` |

@@ -25,6 +25,7 @@ Thumbs.db
 
 ## Build output
 publish/
+artifacts/
 
 ## Test artifacts
 test_sandbox*/
