@@ -4,21 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace Lead.Hook.Runtime;
 
-internal static class NativeMemory
-{
-    [DllImport("kernel32.dll")]
-    private static extern bool VirtualProtect(IntPtr lpAddress, UIntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
-
-    private const uint PAGE_EXECUTE_READWRITE = 0x40;
-
-    public static bool MakeWritable(IntPtr address, int size)
-    {
-        if (Environment.OSVersion.Platform == PlatformID.Win32NT)
-            return VirtualProtect(address, (UIntPtr)size, PAGE_EXECUTE_READWRITE, out _);
-        return true;
-    }
-}
-
 internal static class JitHelper
 {
     public static IntPtr GetNativeCode(MethodInfo method)
@@ -36,19 +21,57 @@ internal static class JitHelper
     {
         try
         {
-            var bytes = new byte[16];
-            Marshal.Copy(funcPtr, bytes, 0, 16);
-
-            if (bytes[0] == 0xFF && bytes[1] == 0x25)
-            {
-                var offset = BitConverter.ToInt32(bytes, 2);
-                var targetAddr = Marshal.ReadIntPtr(funcPtr + 6 + offset);
-                if (targetAddr != IntPtr.Zero)
-                    return targetAddr;
-            }
+            if (PlatformInfo.IsX64)
+                return ResolveX64EntryPoint(funcPtr);
+            if (PlatformInfo.IsArm64)
+                return ResolveArm64EntryPoint(funcPtr);
         }
         catch
         {
+        }
+
+        return funcPtr;
+    }
+
+    private static IntPtr ResolveX64EntryPoint(IntPtr funcPtr)
+    {
+        var bytes = new byte[16];
+        Marshal.Copy(funcPtr, bytes, 0, 16);
+
+        if (bytes[0] == 0xFF && bytes[1] == 0x25)
+        {
+            var offset = BitConverter.ToInt32(bytes, 2);
+            var targetAddr = Marshal.ReadIntPtr(funcPtr + 6 + offset);
+            if (targetAddr != IntPtr.Zero)
+                return targetAddr;
+        }
+
+        if (bytes[0] == 0xE9)
+        {
+            var offset = BitConverter.ToInt32(bytes, 1);
+            return funcPtr + 5 + offset;
+        }
+
+        if (bytes[0] == 0x48 && bytes[1] == 0xB8)
+        {
+            var addr = Marshal.ReadIntPtr(funcPtr + 2);
+            if (addr != IntPtr.Zero)
+                return addr;
+        }
+
+        return funcPtr;
+    }
+
+    private static IntPtr ResolveArm64EntryPoint(IntPtr funcPtr)
+    {
+        var bytes = new byte[8];
+        Marshal.Copy(funcPtr, bytes, 0, 8);
+
+        if ((bytes[3] & 0x9F) == 0x90 && (bytes[7] & 0xFF) == 0xD6)
+        {
+            var addr = Marshal.ReadIntPtr(funcPtr - 8);
+            if (addr != IntPtr.Zero)
+                return addr;
         }
 
         return funcPtr;
@@ -72,12 +95,14 @@ internal sealed class RuntimePatcher
         if (originalPtr == IntPtr.Zero || replacementPtr == IntPtr.Zero)
             throw new InvalidOperationException($"Cannot get native entry point. Original: {originalPtr}, Replacement: {replacementPtr}");
 
-        var originalBytes = BackupBytes(originalPtr, 32);
+        var patchSize = PlatformInfo.PatchSize;
+        var originalBytes = BackupBytes(originalPtr, patchSize);
 
-        if (!NativeMemory.MakeWritable(originalPtr, 32))
+        if (!NativeMemory.MakeWritable(originalPtr, patchSize))
             throw new InvalidOperationException("Failed to make original method memory writable");
 
-        WriteAbsoluteJump(originalPtr, replacementPtr);
+        var jumpBytes = JumpWriter.BuildJump(originalPtr, replacementPtr);
+        Marshal.Copy(jumpBytes, 0, originalPtr, jumpBytes.Length);
 
         var patch = new RuntimePatch(original, replacement, originalPtr, replacementPtr, originalBytes);
         _patches.Add(patch);
@@ -99,20 +124,6 @@ internal sealed class RuntimePatcher
         foreach (var patch in _patches.ToList())
             RestoreBytes(patch.OriginalEntry, patch.OriginalBytes);
         _patches.Clear();
-    }
-
-    private static void WriteAbsoluteJump(IntPtr from, IntPtr to)
-    {
-        var jumpBytes = new byte[14];
-        jumpBytes[0] = 0xFF;
-        jumpBytes[1] = 0x25;
-        jumpBytes[2] = 0x00;
-        jumpBytes[3] = 0x00;
-        jumpBytes[4] = 0x00;
-        jumpBytes[5] = 0x00;
-        BitConverter.TryWriteBytes(jumpBytes.AsSpan(6, 8), to.ToInt64());
-
-        Marshal.Copy(jumpBytes, 0, from, 14);
     }
 
     private static byte[] BackupBytes(IntPtr address, int count)

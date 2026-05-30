@@ -43,7 +43,8 @@ internal sealed class TrampolineFactory
         var paramTypes = original.GetParameters().Select(p => p.ParameterType).ToArray();
         var delegateType = BuildDelegateType(paramTypes, original.ReturnType);
 
-        var trampolineBytes = new byte[originalBytes.Length + 14];
+        var jumpSize = PlatformInfo.JumpSize;
+        var trampolineBytes = new byte[originalBytes.Length + jumpSize];
         Array.Copy(originalBytes, 0, trampolineBytes, 0, originalBytes.Length);
 
         var trampolinePtr = Marshal.AllocHGlobal(trampolineBytes.Length);
@@ -53,17 +54,8 @@ internal sealed class TrampolineFactory
             Marshal.Copy(trampolineBytes, 0, trampolinePtr, originalBytes.Length);
 
             var jumpTarget = (long)originalEntry + originalBytes.Length;
-            var jumpOffset = jumpTarget - ((long)trampolinePtr + originalBytes.Length + 14);
-
-            trampolineBytes[originalBytes.Length] = 0xFF;
-            trampolineBytes[originalBytes.Length + 1] = 0x25;
-            trampolineBytes[originalBytes.Length + 2] = 0x00;
-            trampolineBytes[originalBytes.Length + 3] = 0x00;
-            trampolineBytes[originalBytes.Length + 4] = 0x00;
-            trampolineBytes[originalBytes.Length + 5] = 0x00;
-            BitConverter.TryWriteBytes(trampolineBytes.AsSpan(originalBytes.Length + 6, 8), jumpTarget);
-
-            Marshal.Copy(trampolineBytes, originalBytes.Length, trampolinePtr + originalBytes.Length, 14);
+            var jumpBytes = JumpWriter.BuildTrampolineJump(trampolinePtr + originalBytes.Length, (IntPtr)jumpTarget);
+            Marshal.Copy(jumpBytes, 0, trampolinePtr + originalBytes.Length, jumpBytes.Length);
         }
         catch
         {
@@ -76,13 +68,6 @@ internal sealed class TrampolineFactory
 
     private static Type BuildDelegateType(Type[] paramTypes, Type returnType)
     {
-        var typeArgs = new List<Type>();
-        typeArgs.AddRange(paramTypes);
-        typeArgs.Add(returnType);
-
-        if (typeArgs.Count == 1 && typeArgs[0] == typeof(void))
-            return typeof(Action);
-
         if (returnType == typeof(void))
         {
             return paramTypes.Length switch

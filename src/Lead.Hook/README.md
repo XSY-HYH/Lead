@@ -135,13 +135,22 @@ public static IntPtr GetPtr() => IntPtr.Zero;
 ## Runtime Patching — How It Works
 
 1. Forces JIT compilation of both original and replacement methods via `RuntimeHelpers.PrepareMethod`
-2. Resolves the real native entry point by following the PreJitStub indirect jump (`FF 25 xx xx xx xx`)
-3. Backs up the original method's first 32 bytes
-4. Writes an absolute jump (`FF 25 00 00 00 00 <8-byte address>`) to the replacement method
+2. Resolves the real native entry point by following the PreJitStub indirect jump
+3. Backs up the original method's native code
+4. Writes an absolute jump to the replacement method
 5. On unpatch: restores the original bytes
 
+**Platform Support:**
+
+| Platform | Memory Protection | Jump Encoding | Status |
+|---|---|---|---|
+| Windows x64 | `VirtualProtect` | `FF 25 00 00 00 00 <addr>` | Tested |
+| Linux x64 | `mprotect` | `FF 25 00 00 00 00 <addr>` | Supported |
+| macOS x64 | `mprotect` | `FF 25 00 00 00 00 <addr>` | Supported |
+| Linux ARM64 | `mprotect` | `LDR X16, [PC]; BR X16` | Supported |
+| macOS ARM64 | `mprotect` | `LDR X16, [PC]; BR X16` | Supported |
+
 **Limitations:**
-- Windows x64 only (uses `VirtualProtect` and x64 `jmp [rip+addr]` encoding)
 - Methods must be JIT-compiled before patching (call them once first)
 - Tiered Compilation may re-JIT methods, potentially overwriting patches
 
