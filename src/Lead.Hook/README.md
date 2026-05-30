@@ -1,12 +1,15 @@
 # Lead.Hook
 
-A lightweight IL-rewriting hook engine for .NET 8+ and .NET 10 — no Harmony, no runtime patching, no native hooks.
+A dual-mode hook engine for .NET 8+ and .NET 10 — IL rewriting at load time **and** runtime native patching, no Harmony required.
 
-## How It Works
+## Dual-Mode Architecture
 
-Lead.Hook rewrites IL instructions **at assembly load time** using Mono.Cecil. It scans target assemblies for specific IL patterns and replaces them with calls to your replacement methods — before the code ever executes.
+| Mode | When | How | Undo |
+|---|---|---|---|
+| **ILRewrite** | Before assembly loads | Mono.Cecil rewrites IL instructions | N/A (permanent for loaded assembly) |
+| **RuntimePatch** | After methods are JIT-compiled | Overwrites native code entry with `jmp [rip+addr]` | Fully reversible via `Unpatch()` |
 
-## Supported Hook Types
+## IL Rewriting — Supported Hook Types
 
 | HookType | IL Instruction | Description |
 |---|---|---|
@@ -19,32 +22,74 @@ Lead.Hook rewrites IL instructions **at assembly load time** using Mono.Cecil. I
 | `Box` | `box` / `unbox.any` | Intercept boxing/unboxing |
 | `FunctionPointer` | `ldftn` / `ldvirtftn` | Intercept function pointer acquisition |
 
-## Quick Start
+## Quick Start — IL Rewriting
 
 ```csharp
 using Lead.Hook;
 
 var engine = new HookBuilder()
-    // CallSite: redirect method call
     .Hook("MyApp.TextPrinter", "GetText")
         .With(typeof(MyReplacement), "GetText")
 
-    // MethodBody: replace entire method body (static class safe)
     .Hook("MyApp.SecretKeeper", "GetSecret", HookType.MethodBody)
         .With(typeof(SecretReplacement), "GetSecret")
 
-    // NewObj: intercept constructor
     .Hook("MyApp.ConfigLoader", ".ctor", HookType.NewObj)
         .With(typeof(ConfigFactory), "Create")
 
-    // FieldRead: intercept field access
     .Hook("MyApp.UserProfile", "Name", HookType.FieldRead)
         .With(typeof(FieldHooks), "GetName")
 
     .Build();
 
 var result = engine.RewriteWithResult("TargetApp.dll");
-// Load result.RewrittenAssembly via AssemblyLoadContext
+```
+
+## Quick Start — Runtime Patching
+
+```csharp
+using Lead.Hook;
+
+using var runtime = new RuntimeHookEngine();
+
+// Patch a static method
+runtime.Patch(typeof(MyClass).GetMethod("StaticMethod")!,
+              typeof(MyReplacement).GetMethod("StaticMethod")!);
+
+// Patch an instance method (replacement receives 'this' as first param)
+runtime.Patch(typeof(MyClass).GetMethod("InstanceMethod")!,
+              typeof(MyReplacement).GetMethod("InstanceMethod")!);
+
+// Now calls to MyClass.StaticMethod() and obj.InstanceMethod() are redirected
+
+// Unpatch a specific method
+runtime.Unpatch(typeof(MyClass).GetMethod("StaticMethod")!);
+
+// Unpatch all
+runtime.UnpatchAll();
+```
+
+## Mixed Mode — IL Rewrite + Runtime Patch
+
+```csharp
+var engine = new HookBuilder()
+    // IL rewrite rules (applied at assembly load)
+    .Hook("MyApp.TextPrinter", "GetText")
+        .With(typeof(MyReplacement), "GetText")
+
+    // Runtime patch rules (applied to already-loaded methods)
+    .Hook("MyApp.LiveService", "Process", HookType.CallSite, PatchMode.RuntimePatch)
+        .With(typeof(LiveReplacement), "Process")
+
+    .Build();
+
+// IL rewrite happens here
+var result = engine.RewriteWithResult("TargetApp.dll");
+
+// Runtime patches are applied automatically for PatchMode.RuntimePatch rules
+// Access runtime engine directly:
+engine.ApplyRuntimePatch("MyApp.AnotherType", "Method", typeof(Replacement), "Method");
+engine.RemoveRuntimePatch("MyApp.AnotherType", "Method");
 ```
 
 ## Replacement Method Signatures
@@ -86,6 +131,19 @@ public static int UnboxInt(object value) => (int)value;
 // FunctionPointer: returns IntPtr
 public static IntPtr GetPtr() => IntPtr.Zero;
 ```
+
+## Runtime Patching — How It Works
+
+1. Forces JIT compilation of both original and replacement methods via `RuntimeHelpers.PrepareMethod`
+2. Resolves the real native entry point by following the PreJitStub indirect jump (`FF 25 xx xx xx xx`)
+3. Backs up the original method's first 32 bytes
+4. Writes an absolute jump (`FF 25 00 00 00 00 <8-byte address>`) to the replacement method
+5. On unpatch: restores the original bytes
+
+**Limitations:**
+- Windows x64 only (uses `VirtualProtect` and x64 `jmp [rip+addr]` encoding)
+- Methods must be JIT-compiled before patching (call them once first)
+- Tiered Compilation may re-JIT methods, potentially overwriting patches
 
 ## .NET 10 Compatibility
 

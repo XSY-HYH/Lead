@@ -19,15 +19,17 @@ public sealed class HookRule
     public Type ReplacementType { get; }
     public string ReplacementMethod { get; }
     public HookType HookType { get; }
+    public PatchMode PatchMode { get; }
     public string? Description { get; }
 
-    public HookRule(string originalType, string originalMethod, Type replacementType, string replacementMethod, HookType hookType = HookType.CallSite, string? description = null)
+    public HookRule(string originalType, string originalMethod, Type replacementType, string replacementMethod, HookType hookType = HookType.CallSite, PatchMode patchMode = PatchMode.ILRewrite, string? description = null)
     {
         OriginalType = originalType ?? throw new ArgumentNullException(nameof(originalType));
         OriginalMethod = originalMethod ?? throw new ArgumentNullException(nameof(originalMethod));
         ReplacementType = replacementType ?? throw new ArgumentNullException(nameof(replacementType));
         ReplacementMethod = replacementMethod ?? throw new ArgumentNullException(nameof(replacementMethod));
         HookType = hookType;
+        PatchMode = patchMode;
         Description = description;
     }
 
@@ -45,6 +47,7 @@ public sealed class HookRule
             HookType.FunctionPointer => "[FuncPtr] ",
             _ => ""
         };
-        return $"{prefix}{OriginalType}::{OriginalMethod} → {ReplacementType.FullName}::{ReplacementMethod}";
+        var mode = PatchMode == PatchMode.RuntimePatch ? " (runtime)" : "";
+        return $"{prefix}{OriginalType}::{OriginalMethod} → {ReplacementType.FullName}::{ReplacementMethod}{mode}";
     }
 }

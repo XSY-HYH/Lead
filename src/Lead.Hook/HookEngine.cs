@@ -1,4 +1,5 @@
 using System.Reflection;
+using Lead.Hook.Runtime;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -8,11 +9,18 @@ public sealed class HookEngine
 {
     private readonly List<HookRule> _rules = new();
     private readonly Dictionary<string, Assembly> _replacementAssemblies = new();
+    private readonly RuntimeHookEngine? _runtimeEngine;
     private int _rewriteCount;
     private bool _sealed;
 
     public int RewriteCount => _rewriteCount;
     public IReadOnlyList<HookRule> Rules => _rules.AsReadOnly();
+    public RuntimeHookEngine? RuntimeEngine => _runtimeEngine;
+
+    public HookEngine()
+    {
+        _runtimeEngine = new RuntimeHookEngine();
+    }
 
     public HookEngine AddRule(HookRule rule)
     {
@@ -28,9 +36,9 @@ public sealed class HookEngine
         return this;
     }
 
-    public HookEngine AddRule(string originalType, string originalMethod, Type replacementType, string replacementMethod, HookType hookType = HookType.CallSite, string? description = null)
+    public HookEngine AddRule(string originalType, string originalMethod, Type replacementType, string replacementMethod, HookType hookType = HookType.CallSite, PatchMode patchMode = PatchMode.ILRewrite, string? description = null)
     {
-        return AddRule(new HookRule(originalType, originalMethod, replacementType, replacementMethod, hookType, description));
+        return AddRule(new HookRule(originalType, originalMethod, replacementType, replacementMethod, hookType, patchMode, description));
     }
 
     public HookEngine RemoveRule(string originalType, string originalMethod)
@@ -50,6 +58,12 @@ public sealed class HookEngine
     public byte[] Rewrite(string assemblyPath)
     {
         Seal();
+        var ilRules = _rules.Where(r => r.PatchMode == PatchMode.ILRewrite).ToList();
+        var runtimeRules = _rules.Where(r => r.PatchMode == PatchMode.RuntimePatch).ToList();
+
+        if (runtimeRules.Count > 0)
+            ApplyRuntimePatches(runtimeRules);
+
         var readerParams = new ReaderParameters
         {
             ReadingMode = ReadingMode.Immediate,
@@ -58,7 +72,7 @@ public sealed class HookEngine
         };
 
         using var asm = AssemblyDefinition.ReadAssembly(assemblyPath, readerParams);
-        RewriteAssembly(asm);
+        RewriteAssembly(asm, ilRules);
 
         using var ms = new MemoryStream();
         asm.Write(ms);
@@ -68,6 +82,12 @@ public sealed class HookEngine
     public byte[] Rewrite(byte[] assemblyBytes)
     {
         Seal();
+        var ilRules = _rules.Where(r => r.PatchMode == PatchMode.ILRewrite).ToList();
+        var runtimeRules = _rules.Where(r => r.PatchMode == PatchMode.RuntimePatch).ToList();
+
+        if (runtimeRules.Count > 0)
+            ApplyRuntimePatches(runtimeRules);
+
         using var input = new MemoryStream(assemblyBytes);
         var readerParams = new ReaderParameters
         {
@@ -77,7 +97,7 @@ public sealed class HookEngine
         };
 
         using var asm = AssemblyDefinition.ReadAssembly(input, readerParams);
-        RewriteAssembly(asm);
+        RewriteAssembly(asm, ilRules);
 
         using var ms = new MemoryStream();
         asm.Write(ms);
@@ -96,6 +116,76 @@ public sealed class HookEngine
         var countBefore = _rewriteCount;
         var bytes = Rewrite(assemblyBytes);
         return new HookResult(bytes, _rewriteCount - countBefore, _rules.Count);
+    }
+
+    public void ApplyRuntimePatch(MethodInfo original, MethodInfo replacement)
+    {
+        _runtimeEngine?.Patch(original, replacement);
+    }
+
+    public void ApplyRuntimePatch(string originalTypeFullName, string methodName, Type replacementType, string replacementMethodName)
+    {
+        _runtimeEngine?.Patch(originalTypeFullName, methodName, replacementType, replacementMethodName);
+    }
+
+    public bool RemoveRuntimePatch(string originalTypeFullName, string methodName)
+    {
+        return _runtimeEngine?.Unpatch(originalTypeFullName, methodName) ?? false;
+    }
+
+    public void RemoveAllRuntimePatches()
+    {
+        _runtimeEngine?.UnpatchAll();
+    }
+
+    public TDelegate? GetTrampoline<TDelegate>(MethodInfo original) where TDelegate : Delegate
+    {
+        return _runtimeEngine?.GetTrampoline<TDelegate>(original);
+    }
+
+    private void ApplyRuntimePatches(List<HookRule> runtimeRules)
+    {
+        foreach (var rule in runtimeRules)
+        {
+            var originalType = FindLoadedType(rule.OriginalType);
+            if (originalType == null)
+            {
+                Console.Error.WriteLine($"[Lead.Hook] Runtime patch skipped: type {rule.OriginalType} not found in loaded assemblies");
+                continue;
+            }
+
+            var originalMethod = originalType.GetMethod(rule.OriginalMethod,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance);
+            if (originalMethod == null)
+            {
+                Console.Error.WriteLine($"[Lead.Hook] Runtime patch skipped: method {rule.OriginalType}::{rule.OriginalMethod} not found");
+                continue;
+            }
+
+            var replacementMethod = rule.ReplacementType.GetMethod(rule.ReplacementMethod,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance);
+            if (replacementMethod == null)
+            {
+                Console.Error.WriteLine($"[Lead.Hook] Runtime patch skipped: replacement method {rule.ReplacementType.Name}::{rule.ReplacementMethod} not found");
+                continue;
+            }
+
+            _runtimeEngine?.Patch(originalMethod, replacementMethod);
+        }
+    }
+
+    private static Type? FindLoadedType(string fullName)
+    {
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            try
+            {
+                var type = asm.GetType(fullName);
+                if (type != null) return type;
+            }
+            catch { }
+        }
+        return null;
     }
 
     private void Seal()
@@ -133,10 +223,10 @@ public sealed class HookEngine
         public Dictionary<string, List<HookRule>> FunctionPointer = new();
     }
 
-    private RuleSet BuildRuleSet()
+    private RuleSet BuildRuleSet(List<HookRule> rules)
     {
         var rs = new RuleSet();
-        foreach (var rule in _rules)
+        foreach (var rule in rules)
         {
             var key = $"{rule.OriginalType}::{rule.OriginalMethod}";
             var target = rule.HookType switch
@@ -158,10 +248,10 @@ public sealed class HookEngine
         return rs;
     }
 
-    private void RewriteAssembly(AssemblyDefinition asm)
+    private void RewriteAssembly(AssemblyDefinition asm, List<HookRule> ilRules)
     {
         var module = asm.MainModule;
-        var rs = BuildRuleSet();
+        var rs = BuildRuleSet(ilRules);
 
         foreach (var type in module.GetTypes())
         {
