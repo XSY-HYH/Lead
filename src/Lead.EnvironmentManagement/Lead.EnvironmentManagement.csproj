@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <PackageId>Lead.EnvironmentManagement</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>Lead Contributors</Authors>
     <Description>Upper-level encapsulation for Lead.Sandbox — one-click preset sandboxes for Windows/Linux, system info spoofing, and runtime variable inspection.</Description>
     <PackageTags>sandbox;environment;honeypot;virtualization;runtime-inspection</PackageTags>
